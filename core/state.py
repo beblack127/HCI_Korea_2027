@@ -1,10 +1,11 @@
 """Evidence-bound projections, not a measurement of hidden cognition."""
 import copy
 import re
+from .behavior import behavior_signals, support_bundles, support_issues, request_type
+from .difficulty import LABELS as DIFFICULTY_LABELS, negative_experience, difficulty_kind, guess_kind, technical_connection, pending_difficulties
 
 OBSERVATIONS = {"user_input", "topic_select", "topic_browse", "topic_refine", "paper_search_submit",
                 "abstract_expand", "abstract_collapse", "paper_open", "paper_save", "paper_unsave", "session_wrapup"}
-DIFFICULTY_LABELS = {"concept": "개념 이해", "connection": "관심과의 연결", "selection": "후보 선택", "formulation": "주제 구체화"}
 STAGE_LABELS = {"exploring": "방향 탐색", "forming": "방향 형성", "unknown": "판단 유보"}
 ACTION_LABELS = {"topic_select": "후보 선택", "topic_browse": "둘러보기 선택", "topic_refine": "구체화하기 선택",
                  "paper_search_submit": "논문 검색", "abstract_expand": "초록 펼치기", "abstract_collapse": "초록 접기",
@@ -15,7 +16,7 @@ def empty_state():
     return {"direction_stage": "unknown", "current_direction": "", "research_problem": "",
             "problem_evidence_ids": [], "problem_evidence": [],
             "summary": "아직 탐색 상태를 판단할 정보가 충분하지 않습니다.", "recent_change": "",
-            "difficulty_status": "unknown", "difficulties": [], "difficulty_history": [], "evidence": [],
+            "difficulty_status": "unknown", "difficulties": [], "difficulty_history": [], "pending_difficulties": [], "support_issues": [], "evidence": [],
             "unresolved": [], "support_request": "directions", "support_request_evidence_ids": [],
             "recommendation_intent": "uncertain", "recommendation_evidence_ids": [], "topic_relation": "uncertain"}
 
@@ -87,39 +88,13 @@ def _clauses(value):
 
 
 def _difficulty_expression(kind, value):
-    patterns = {
-        "concept": r"이해.{0,15}(?:안|못|어려)|(?:개념|용어|설명|뜻).{0,25}(?:모르|막막|어려)",
-        "connection": r"(?:관련|연결|왜\s*추천).{0,25}(?:모르|이해.{0,5}안|어려)|관심.{0,25}맞는.{0,10}모르",
-        "selection": r"(?:선택|고르|고를|골라|비교|결정).{0,20}(?:모르|막막|어려|못)|(?:뭘|무엇을|어떤|어느).{0,12}(?:골라|고르|선택).{0,12}모르",
-        "formulation": r"(?:주제|연구\s*문제|연구\s*질문|범위|구체화|좁히).{0,35}(?:모르|막막|어려|못|안\s*돼)",
-    }
-    return any(re.search(patterns[kind], clause) and not _resolved_expression(clause)
-               and not re.search(r"이해.{0,10}안.{0,8}(?:아니|않)|어려운.{0,5}(?:아니|않)", clause)
-               for clause in _clauses(value))
-
-
-def behavior_signals(events):
-    """Combinations are weak context; a lone open/save never creates a difficulty."""
-    recent = [e for e in events if e["type"] in OBSERVATIONS][-30:]
-    signals = []
-    choices = [e for e in recent if e["type"] in {"topic_select", "topic_browse", "topic_refine"}]
-    ids = [e["payload"].get("recommendation_id") for e in choices]
-    if len(choices) >= 4 and len(set(ids) - {None, ""}) >= 2 and len(ids) > len(set(ids)):
-        signals.append({"pattern": "candidate_revisits", "type": "selection", "event_ids": [e["id"] for e in choices[-6:]],
-                        "observation": "여러 후보 사이를 오가며 이전 후보를 다시 선택했습니다. 합리적 비교일 수도 있습니다."})
-    searches = [e for e in recent if e["type"] == "paper_search_submit"]
-    reviews = [e for e in recent if e["type"] in {"abstract_expand", "paper_open", "paper_save"}]
-    if len({e["payload"].get("query") for e in searches}) >= 3 and len(reviews) >= 2:
-        signals.append({"pattern": "search_and_review", "type": "selection",
-                        "event_ids": [e["id"] for e in searches[-3:] + reviews[-2:]],
-                        "observation": "검색어를 바꾸며 여러 문헌을 검토했습니다. 관심 탐색인지 선택의 어려움인지는 별도 맥락이 필요합니다."})
-    return signals
+    return negative_experience(value) and guess_kind(value) == kind
 
 
 def _request_kind(content):
     if re.search(r"(?:논문|문헌).{0,15}(?:추천|찾|보여)|관련\s*논문", content):
         return "literature"
-    if re.search(r"(?:뭐야|무슨\s*뜻|정의|개념.{0,10}설명|쉽게.{0,10}설명|예시.{0,10}설명|이해가?\s*안)", content):
+    if technical_connection(content) or re.search(r"(?:뭐야|무슨\s*뜻|정의|개념.{0,10}설명|쉽게.{0,10}설명|예시.{0,10}설명|이해가?\s*안)", content):
         return "concept"
     if re.search(r"(?:관련|연결|왜\s*추천)", content):
         return "connection"
@@ -156,13 +131,16 @@ def summarize_state(state):
         summary = "현재 기록만으로는 탐색 방향과 구체화 정도를 판단하기 어려워요."
     expressed = [d for d in state["difficulties"] if d["status"] == "expressed"]
     if expressed:
-        summary += " " + "·".join(DIFFICULTY_LABELS[d["type"]] for d in expressed) + " 과정에서 어려움을 표현했어요."
+        summary += (" 탐색에서 어려움을 표현했으며 유형은 아직 판단하지 않았어요." if len(expressed) == 1 and expressed[0]["type"] == "unspecified"
+                    else " " + "·".join(DIFFICULTY_LABELS[d["type"]] for d in expressed) + "의 어려움을 표현했어요.")
     elif state["difficulties"]:
-        summary += " 활동과 대화 맥락상 후보 검토에 지원이 필요할 가능성이 있어요."
+        summary += " 활동과 대화 맥락상 탐색 지원이 필요할 가능성이 있어요."
+    elif pending_difficulties(state):
+        summary += " 이전에 표현한 어려움의 해소 여부는 아직 확인되지 않았어요."
     return summary
 
 
-def validate_state(raw, events, previous=None):
+def validate_state(raw, events, previous=None, trace=None):
     """Validate quotations and conservative criteria; no claim of psychological truth."""
     state, warnings = empty_state(), []
     allowed = {e["id"]: e for e in events if e["type"] in OBSERVATIONS}
@@ -206,6 +184,8 @@ def validate_state(raw, events, previous=None):
             state["recommendation_intent"], state["recommendation_evidence_ids"] = "generate", [latest_id]
         elif state["support_request"] in {"concept", "connection", "compare", "literature"}:
             state["recommendation_intent"] = "preserve"
+        if technical_connection(content):
+            state["support_request"], state["support_request_evidence_ids"] = "concept", [latest_id]
 
     topic_ids = valid_ids(raw.get("topic_evidence_ids"), allowed)
     explicit_shift = bool(re.search(r"다른\s*주제|주제를?\s*바꾸|이제.{0,25}(?:대신|주제로|탐색할)|그건\s*그만", content))
@@ -218,12 +198,40 @@ def validate_state(raw, events, previous=None):
             state["direction_stage"] = "unknown"
         warnings.append("old_problem_outside_current_direction")
     history = _history(previous)
+    for h in history:
+        if h.get("lifecycle") in {"active", "unconfirmed"}:
+            value = " ".join(r.get("quote", "") for r in h.get("evidence_quotes", []))
+            kind = difficulty_kind(h["type"], value)
+            if value and kind != h["type"]:
+                h.setdefault("original_type", h["type"])
+                h["type"] = kind
     old_through = max([h.get("last_event_id", 0) for h in history] or [0])
     for h in history:
         if h["lifecycle"] in {"active", "unconfirmed"}:
             h["lifecycle"] = "out_of_scope" if changed else "unconfirmed"
-    patterns = behavior_signals(events)
-    for d in (raw.get("difficulties") or [])[:4]:
+    behavior_trace = trace if trace is not None else events
+    # The behavior window handles explicit topic switches. Candidate comparisons may cross branches.
+    progress_ids = list(state.get("problem_evidence_ids", []))
+    for a in state.get("clarified_aspects", []) + (previous or {}).get("clarified_aspects", []):
+        if a.get("kind") in {"scope", "perspective"}:
+            if request_type(a.get("text", "")) and not re.search(r"상황|대상|환경|한정|조건|에서|관점|초점|맥락", a.get("text", "")):
+                continue
+            progress_ids.extend(i for i in a.get("evidence_ids", []) if i in allowed and allowed[i]["type"] == "user_input"
+                                and a.get("text") and a["text"] in allowed[i]["payload"].get("text", ""))
+    progress_boundary = max(progress_ids or [0])
+    patterns = behavior_signals([e for e in behavior_trace if e["id"] >= progress_boundary])
+    bundles = {b["type"]: b for b in support_bundles(patterns, latest_id)}
+    state["behavior_signals"] = patterns
+    state["support_issues"] = support_issues(behavior_trace)
+    candidates = list(raw.get("difficulties") or [])[:5]
+    if content and negative_experience(content) and not any(
+            negative_experience(r["quote"]) for d in candidates if isinstance(d, dict)
+            for r in quoted_evidence(d.get("evidence_quotes"), allowed) if r["event_id"] == latest_id):
+        candidates.append({"type": guess_kind(content), "status": "expressed", "evidence_ids": [latest_id],
+                           "evidence_quotes": [{"event_id": latest_id, "quote": content}]})
+    for kind, bundle in bundles.items():
+        candidates.append({"type": kind, "status": "possible", "evidence_ids": bundle["event_ids"], "evidence_quotes": []})
+    for d in candidates:
         if not isinstance(d, dict) or d.get("type") not in DIFFICULTY_LABELS:
             continue
         kind = d["type"]
@@ -232,13 +240,15 @@ def validate_state(raw, events, previous=None):
             warnings.append("difficulty_without_observation")
             continue
         quotes = quoted_evidence(d.get("evidence_quotes"), allowed)
-        direct = [r for r in quotes if r["event_id"] in ids and _difficulty_expression(kind, r["quote"])
-                  and _difficulty_expression(kind, allowed[r["event_id"]]["payload"].get("text", ""))]
-        pattern = next((p for p in patterns if p["type"] == kind and len(set(ids) & set(p["event_ids"])) >= 3), None)
-        context_quotes = [r for r in quotes if r["event_id"] in ids and re.search(r"막막|모르겠|어려|정리.{0,8}안|고민", r["quote"])]
+        direct = [r for r in quotes if r["event_id"] in ids and negative_experience(r["quote"])
+                  and negative_experience(allowed[r["event_id"]]["payload"].get("text", ""))]
         if direct:
             status = "expressed"
-        elif pattern and (context_quotes or len(patterns) >= 2) and d.get("status") == "possible":
+            original_kind = kind
+            kind = difficulty_kind(kind, direct[0]["quote"])
+            if kind != original_kind:
+                warnings.append("difficulty_type_reinterpreted")
+        elif kind in bundles and len(set(ids) & set(bundles[kind]["event_ids"])) >= 3 and d.get("status") == "possible":
             status = "possible"
         else:
             warnings.append("difficulty_without_supported_meaning")
@@ -246,12 +256,18 @@ def validate_state(raw, events, previous=None):
         if changed and latest_id not in ids:
             continue
         existing = next((h for h in reversed(history) if h["type"] == kind and h["lifecycle"] in {"active", "unconfirmed"}), None)
+        if existing and existing.get("status") == "expressed" and status == "possible":
+            existing.update(recent_signals=bundles[kind]["signals"], last_behavior_event_id=max(ids))
+            continue
         if existing and max(ids) <= existing.get("last_event_id", 0):
             continue
-        description = (f"{DIFFICULTY_LABELS[kind]} 과정의 어려움을 직접 표현했어요." if status == "expressed"
-                       else "여러 후보를 반복 검토하는 활동과 맥락에서 선택 지원이 필요할 가능성이 있어요. 어려움으로 확정하지 않았어요.")
+        description = (("탐색에서 어려움을 표현했어요. 어떤 유형인지는 아직 판단하지 않았어요." if kind == "unspecified"
+                        else f"{DIFFICULTY_LABELS[kind]}의 어려움을 직접 표현했어요.") if status == "expressed"
+                       else f"서로 다른 활동 단서가 함께 나타나 {DIFFICULTY_LABELS[kind]} 지원이 필요할 가능성이 있어요. 어려움으로 확정하지 않았어요.")
         item = {"type": kind, "status": status, "description": description,
-                "evidence_ids": ids, "evidence_quotes": direct or context_quotes}
+                "evidence_ids": ids, "evidence_quotes": direct,
+                "source": "utterance" if status == "expressed" else "behavior",
+                "signals": bundles[kind]["signals"] if status == "possible" else []}
         if existing:
             existing.update(item, lifecycle="active", last_event_id=max(ids))
         else:
@@ -270,7 +286,7 @@ def validate_state(raw, events, previous=None):
         if not h or update.get("outcome") != "resolved" or not refs:
             continue
         original = allowed[latest_id]["payload"].get("text", "")
-        names = {"concept": r"개념|이해|설명|뜻", "connection": r"관련|연결", "selection": r"선택|결정|고르|골랐", "formulation": r"구체화|연구\s*(?:문제|질문)|범위"}
+        names = {"concept": r"개념|이해|설명|뜻|원리", "connection": r"관련|연결", "selection": r"선택|결정|고르|골랐", "formulation": r"구체화|연구\s*(?:문제|질문)|범위", "unspecified": r"정리|흐름|막막|어려움|방향"}
         positive = " ".join(clause for clause in _clauses(original) if _resolved_expression(clause)
                             and any(r["quote"] in clause or clause in r["quote"] for r in refs))
         if positive and (len(open_history) == 1 or re.search(names[h["type"]], positive)):
@@ -279,6 +295,7 @@ def validate_state(raw, events, previous=None):
         else:
             warnings.append("resolution_without_explicit_followup")
     state["difficulty_history"] = history[-20:]
+    state["pending_difficulties"] = pending_difficulties(state)
     if state["difficulties"]:
         state["difficulty_status"] = "expressed" if any(d["status"] == "expressed" for d in state["difficulties"]) else "possible"
     elif any(h["lifecycle"] == "resolved" and h.get("last_event_id") == latest_id for h in history):
@@ -320,8 +337,7 @@ def preview_state(events, previous=None):
     raw["support_request"] = _request_kind(content)
     raw["support_request_evidence_ids"] = [last["id"]] if content else []
     raw["evidence"] = [{"event_id": last["id"], "interpretation": "현재 입력과 선택을 탐색 맥락으로 기록했습니다."}]
-    for kind in DIFFICULTY_LABELS:
-        if content and _difficulty_expression(kind, content):
-            raw["difficulties"].append({"type": kind, "status": "expressed", "description": f"{DIFFICULTY_LABELS[kind]} 과정의 어려움을 직접 표현했습니다.",
-                                        "evidence_ids": [last["id"]], "evidence_quotes": [{"event_id": last["id"], "quote": content}]})
+    if content and negative_experience(content):
+        raw["difficulties"].append({"type": guess_kind(content), "status": "expressed",
+                                    "evidence_ids": [last["id"]], "evidence_quotes": [{"event_id": last["id"], "quote": content}]})
     return validate_state(raw, events, previous)[0]

@@ -63,19 +63,19 @@ class GroundingTests(unittest.TestCase):
         state,_=validate_state(raw,[event(1,'실제 논문','paper_open')])
         self.assertEqual(state['evidence'][0]['observation'],'원문 링크 열기: “실제 논문”')
     def test_normal_browsing_alone_does_not_prove_difficulty(self):
-        events=[event(i,'주제','topic_select',recommendation_id='A' if i%2 else 'B') for i in range(1,5)]
+        events=[event(i,'방향 A' if i%2 else '방향 B','topic_select',recommendation_id='A' if i%2 else 'B') for i in range(1,5)]
         events.append(event(5,'논문','paper_save'))
         self.assertTrue(behavior_signals(events))
         state,_=validate_state(dict(empty_state(),difficulties=[{'type':'selection','status':'expressed','description':'막힘',
             'evidence_ids':[1,2,3,4,5],'evidence_quotes':[]}]),events)
         self.assertEqual(state['difficulties'],[])
         self.assertEqual(behavior_signals([event(1,'논문','paper_save')]),[])
-    def test_combined_behavior_and_ambiguous_context_only_allow_possible(self):
+    def test_explicit_vague_difficulty_keeps_type_undetermined(self):
         events=[event(1,'아직 막막해')]+[event(i,'주제','topic_select',recommendation_id='A' if i%2 else 'B') for i in range(2,6)]
         raw=dict(empty_state(),difficulties=[dict(difficulty(1,'아직 막막해','selection','possible'),evidence_ids=[1,2,3,4,5])])
         state,_=validate_state(raw,events)
-        self.assertEqual(state['difficulty_status'],'possible')
-        self.assertIn('확정하지',state['difficulties'][0]['description'])
+        self.assertEqual(state['difficulty_status'],'expressed')
+        self.assertEqual(state['difficulties'][0]['type'],'unspecified')
 
 class LifecycleTests(unittest.TestCase):
     def setUp(self):
@@ -94,8 +94,9 @@ class LifecycleTests(unittest.TestCase):
         self.assertEqual(state['difficulty_history'][0]['lifecycle'],'unconfirmed')
         self.assertTrue(state['difficulty_history'][0]['support_provided'])
     def test_future_and_unresolved_statements_are_not_resolution(self):
-        for content in ['이제 이해될까?','이제 이해가 될 것 같아','아직 이해가 안 돼']:
+        for content in ['이제 이해될까?','이제 이해가 될 것 같아']:
             self.assertEqual(self.update(content)['difficulty_history'][0]['lifecycle'],'unconfirmed')
+        self.assertEqual(self.update('아직 이해가 안 돼')['difficulty_history'][0]['lifecycle'],'active')
     def test_old_evidence_is_not_fresh_confirmation(self):
         state,_=validate_state(dict(empty_state(),difficulties=[difficulty(1,self.value)]),[self.first,event(2,'논문','paper_save')],self.previous)
         self.assertEqual(state['difficulties'],[])

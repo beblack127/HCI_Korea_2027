@@ -9,6 +9,7 @@ from core.config import Settings
 from core.storage import Store
 from core.service import Workspace
 from core.policy import POLICY_VERSION
+from core.behavior import topic_key
 from core.llm import ModelError
 from core.search import SearchError, normalize_years
 from core.state import OBSERVATIONS, text
@@ -104,7 +105,7 @@ def create_app(settings=None):
                        for r in m["content"].get("recommendations", []) if r["id"] == rid]
             if not matches:
                 raise ValueError("선택한 후보가 없습니다.")
-            details = {"recommendation_id": rid, "title": matches[-1]["title"]}
+            details = {"recommendation_id": rid, "title": matches[-1]["title"], "topic_key": topic_key(matches[-1])}
         elif kind in {"abstract_expand", "abstract_collapse", "paper_open", "paper_save", "paper_unsave"}:
             paper = store.paper(current, body.get("paper_id", ""))
             if not paper:

@@ -1,5 +1,7 @@
 """Different views of one validated state, without another model inference."""
 import re
+from .difficulty import LABELS, pending_difficulties
+from .behavior import topic_steps
 
 RELATION_LABELS = {"problem": "문제 살펴보기", "perspective": "관점 더하기", "scope": "범위 좁히기",
                    "concept": "개념 연결", "continuation": "현재 방향 이어가기"}
@@ -19,9 +21,17 @@ def chat_summary(state):
     topic = compact(state.get("research_problem") or state.get("current_direction"), limit=70)
     active = state.get("difficulties") or []
     expressed = next((d for d in active if d.get("status") == "expressed"), None)
-    labels = {"concept": "개념 이해", "connection": "관심과의 연결", "selection": "후보 선택", "formulation": "주제 구체화"}
+    labels = LABELS
     if expressed:
+        if expressed["type"] == "unspecified":
+            return "탐색에서 어려움을 표현했어요. 어떤 유형인지는 아직 판단하지 않았어요."
         return f"‘{topic}’을 살펴보며 {labels[expressed['type']]}의 어려움을 표현했어요." if topic else f"{labels[expressed['type']]}의 어려움을 표현했어요."
+    if active:
+        return f"활동 흐름에서 {labels.get(active[0]['type'], '탐색')} 지원이 필요할 가능성이 있어요."
+    pending = pending_difficulties(state)
+    if pending:
+        label = labels.get(pending[-1]["type"], "탐색") if pending[-1]["type"] != "unspecified" else "탐색"
+        return f"이전에 표현한 {label}의 어려움은 해소 여부가 아직 확인되지 않았어요."
     if state.get("direction_stage") == "forming" and topic:
         return f"‘{topic}’에 관한 연구 문제의 범위를 구체화하고 있어요."
     if topic:
@@ -45,13 +55,12 @@ def enrich_state(state, events, previous=None):
     choices = [e for e in scoped if e["type"] in {"topic_select", "topic_browse", "topic_refine"}]
     seen, directions = set(), []
     choice_labels = {"topic_select": "후보 선택", "topic_browse": "둘러보기", "topic_refine": "구체화하기"}
-    for event in reversed(choices):
-        p = event["payload"]
-        key = p.get("recommendation_id") or p.get("title")
+    for step in reversed(topic_steps(scoped)):
+        key = step["key"]
         if key and key not in seen:
             seen.add(key)
-            directions.append({"title": p.get("title", ""), "action": choice_labels[event["type"]],
-                               "event_id": event["id"], "recommendation_id": p.get("recommendation_id", "")})
+            directions.append({"title": step["title"], "action": choice_labels[step["action"]],
+                               "event_id": step["id"], "recommendation_id": step["recommendation_id"]})
     state["observed_directions"] = directions[:3]
     sources = {e["id"]: e for e in scoped if e["type"] == "user_input"}
     aspects = [a for a in state.get("clarified_aspects", []) if any(

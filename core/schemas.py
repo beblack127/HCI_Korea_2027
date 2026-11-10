@@ -25,7 +25,7 @@ SCHEMAS = {
         "summary": string(), "recent_change": string(),
         "clarified_aspects": array(obj({"kind": string(["interest", "problem", "perspective", "scope"]), "evidence_quotes": quotes})),
         "difficulty_status": string(["unknown", "possible", "expressed", "clear"]),
-        "difficulties": array(obj({"type": string(["concept", "connection", "selection", "formulation"]),
+        "difficulties": array(obj({"type": string(["concept", "connection", "selection", "formulation", "unspecified"]),
             "status": string(["possible", "expressed"]), "description": string(), "evidence_ids": ids,
             "evidence_quotes": quotes})),
         "difficulty_updates": array(obj({"difficulty_id": string(), "outcome": string(["resolved", "unconfirmed"]),

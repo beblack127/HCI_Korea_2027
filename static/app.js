@@ -2,8 +2,8 @@
 const $ = id => document.getElementById(id);
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const stateLabels = {exploring:'방향 탐색',forming:'방향 형성',unknown:'판단 유보'};
-const difficultyLabels = {concept:'개념 이해',connection:'관심과의 연결',selection:'후보 선택',formulation:'주제 구체화'};
-const supportLabels = {directions:'다음 탐색 방향',browse:'주제 둘러보기',concept:'개념 설명',connection:'관심과의 연결',compare:'후보 비교',formulate:'주제 구체화',literature:'문헌 검토',wrapup:'탐색 정리'};
+const difficultyLabels = {concept:'개념 이해',connection:'관심과의 연결',selection:'후보 선택',formulation:'주제 구체화',unspecified:'유형 판단 유보'};
+const supportLabels = {directions:'다음 탐색 방향',browse:'주제 둘러보기',concept:'개념 설명',connection:'관심과의 연결',compare:'후보 비교',formulate:'주제 구체화',literature:'문헌 검토',orient:'탐색 흐름 정리',wrapup:'탐색 정리'};
 const historyLabels = {user_input:'질의 입력',topic_browse:'둘러보기',topic_refine:'구체화하기',paper_search_submit:'논문 검색',abstract_expand:'초록 펼치기',abstract_collapse:'초록 접기',paper_open:'원문 링크 열기',paper_save:'관심 논문에 담기',paper_unsave:'관심 논문에서 빼기',session_wrapup:'탐색 정리 선택'};
 let snapshot = null, status = null, busy = false, searching = false, pendingTurn = null;
 let selections = new Map(), expanded = new Set(), eventQueue = Promise.resolve(), toastTimer;
@@ -155,18 +155,25 @@ function renderState() {
   const responseNote=state?.response_status==='generating'?' · 상태 추정 완료, 답변 생성 중':state?.response_status==='error'?' · 상태 저장됨, 답변 재시도 가능':'';
   $('stateUpdated').textContent=estimate ? `${timeOf(estimate.created_at)} 대화 기준${pending ? ` · 이후 활동 ${pending}건 기록` : ''}${responseNote}` : '';
   const difficulties=state?.difficulties||[], expressed=difficulties.some(d=>d.status==='expressed');
-  $('statePane').dataset.difficulty=difficulties.length ? (expressed?'expressed':'possible') : 'unknown';
-  $('difficultySection').hidden=!state||(!difficulties.length&&!state?.difficulty_history?.length);
-  $('difficultySection').dataset.level=difficulties.length ? (expressed?'expressed':'possible') : 'unknown';
+  const pendingDifficulties=state?.pending_difficulties||(state?.difficulty_history||[]).filter(h=>h.lifecycle==='unconfirmed'&&h.status==='expressed');
+  const supportIssues=state?.support_issues||[];
+  const difficultyLevel=difficulties.length ? (expressed?'expressed':'possible') : pendingDifficulties.length?'unconfirmed':'unknown';
+  $('statePane').dataset.difficulty=difficultyLevel;
+  $('difficultySection').hidden=!state||(!difficulties.length&&!state?.difficulty_history?.length&&!supportIssues.length);
+  $('difficultySection').dataset.level=difficultyLevel;
   const unconfirmed=(state?.difficulty_history||[]).some(h=>h.lifecycle==='unconfirmed');
   $('difficultyStatus').textContent=difficulties.length ? (expressed?'어려움 표현 확인':'가능성 추정') : (unconfirmed?'이전 어려움 후속 확인 전':state?.difficulty_status==='clear'?'해결 표현 확인':'판단 유보');
-  $('difficultyBadge').hidden=!difficulties.length;
-  $('difficultyBadge').textContent=difficulties.map(d=>difficultyLabels[d.type]||'탐색').join(' · ') + (expressed?' 어려움 표현':' 어려움 가능성');
-  $('difficultyList').innerHTML=difficulties.length ? difficulties.map(d=>{
+  $('difficultyBadge').hidden=!difficulties.length&&!pendingDifficulties.length;
+  $('difficultyBadge').textContent=difficulties.length ? difficulties.map(d=>difficultyLabels[d.type]||'탐색').join(' · ') + (expressed?' · 어려움 표현':' · 지원 필요 가능성') : pendingDifficulties.length?'이전 어려움 · 후속 확인 전':'';
+  const shownDifficulties=[...difficulties,...pendingDifficulties.slice().reverse()];
+  $('difficultyList').innerHTML=shownDifficulties.length ? shownDifficulties.map(d=>{
     const evidence=snapshot.events.slice().reverse().find(e=>d.evidence_ids?.includes(e.id)&&e.type==='user_input');
     const quote=d.evidence_quotes?.[0]?.quote||evidence?.payload.text||'';
-    return `<div class="difficulty-item"><b>${esc(difficultyLabels[d.type]||'탐색의 어려움')}${d.status==='possible'?' · 가능성':''}</b><p>${esc(d.description)}</p>${quote?`<blockquote class="difficulty-evidence">${esc(quote.slice(0,180))}${quote.length>180?'…':''}</blockquote>`:''}</div>`;
+    const waiting=d.lifecycle==='unconfirmed';
+    const signals=d.recent_signals||d.signals||[];
+    return `<div class="difficulty-item"><b>${esc(difficultyLabels[d.type]||'탐색의 어려움')}${waiting?' · 후속 확인 전':d.status==='possible'?' · 지원 필요 가능성':''}</b><p>${esc(waiting?'이전에 표현한 어려움이에요. 해소 여부는 아직 확인되지 않았어요.':d.description)}</p>${quote?`<blockquote class="difficulty-evidence">${esc(quote.slice(0,180))}${quote.length>180?'…':''}</blockquote>`:''}${signals.length?`<ul class="state-questions">${signals.map(s=>`<li>${esc(s.observation)}</li>`).join('')}</ul>`:''}</div>`;
   }).join('') : `<p class="difficulty-empty">${unconfirmed?'이전 어려움이 해소되었는지는 아직 확인되지 않았어요.':state?.difficulty_status==='clear'?'후속 발화에서 해당 어려움의 해소를 표현했어요.':'현재 기록만으로는 어려움의 유무를 판단하기 어려워요.'}</p>`;
+  $('supportIssueList').innerHTML=supportIssues.map(s=>`<p class="section-note">${esc(s.observation)}</p>`).join('');
   const history=state?.difficulty_history||[], lifecycleLabels={active:'진행 중',unconfirmed:'후속 확인 전',resolved:'해결 표현 확인',out_of_scope:'현재 방향 밖'};
   $('difficultyHistory').hidden=!history.length;
   $('difficultyHistoryList').innerHTML=history.slice().reverse().map(h=>`<div class="difficulty-history-item"><b>${esc(difficultyLabels[h.type]||'탐색')} · ${esc(lifecycleLabels[h.lifecycle]||'후속 확인 전')}</b><p>${esc(h.topic||'이전 탐색 방향')}</p>${h.support_provided?'<span>관련 지원 제공됨 · 지원 제공 자체는 해결의 근거가 아닙니다.</span>':''}</div>`).join('');
@@ -223,7 +230,7 @@ function renderMessages() {
       <div class="message-meta"><span class="agent-mark" aria-hidden="true">R</span><b>탐색 조력자</b><span>${timeOf(m.created_at)}</span><span>· ${esc(supportLabels[c.support_mode]||'다음 탐색 방향')}</span>${c.elapsed_seconds!=null?`<span class="response-duration">${duration(c.elapsed_seconds)} 소요</span>`:''}</div>
       ${c.mode==='preview'?'<div class="preview-answer-label">동작 확인용 예시 · Gemini 미연결</div>':''}
       <div class="assistant-bubble">
-      <p class="message-state" data-difficulty="${['expressed','possible'].includes(c.difficulty_status)?c.difficulty_status:'unknown'}">${esc(c.state_summary)}</p>
+      <p class="message-state" data-difficulty="${['expressed','possible','unconfirmed'].includes(c.difficulty_status)?c.difficulty_status:'unknown'}">${esc(c.state_summary)}</p>
       ${help ? (help.body||help.papers?.length?`<div class="message-help">${help.title&&!compactReply?`<h3>${esc(help.title)}</h3>`:''}${helpBody}${paperButtons(help.papers)}</div>`:'') : `<div class="message-answer">${esc(c.answer)}</div>${c.support?.title||c.support?.body?`<div class="support-block"><h3>${esc(c.support.title)}</h3><p>${esc(c.support.body)}</p>${paperButtons(c.support.papers)}</div>`:''}`}
       ${recapView(c.recap)}
       ${c.next_step?`<div class="next-action${compactReply?' compact':''}" aria-label="다음 탐색 제안">${compactReply?'':'<h3>다음 탐색 제안</h3>'}<p>${esc(c.next_step)}</p>${c.next_step_reason&&!compactReply?`<p class="next-action-reason">${esc(c.next_step_reason)}</p>`:''}</div>`:''}

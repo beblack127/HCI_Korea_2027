@@ -1,7 +1,8 @@
 """Researcher-controlled support policy; the model cannot override this table."""
+from .difficulty import pending_difficulties
 
 
-POLICY_VERSION = "11.11-v2"
+POLICY_VERSION = "11.11-v3"
 
 
 def select_support(state, latest_action="", has_candidates=False, initial=False):
@@ -14,7 +15,7 @@ def select_support(state, latest_action="", has_candidates=False, initial=False)
         evidence_ids = state.get("support_request_evidence_ids", [])
     elif state.get("difficulties"):
         d = sorted(state["difficulties"], key=lambda x: x.get("status") != "expressed")[0]
-        mode = {"concept": "concept", "connection": "connection", "selection": "compare", "formulation": "formulate"}[d["type"]]
+        mode = {"concept": "concept", "connection": "connection", "selection": "compare", "formulation": "formulate", "unspecified": "orient"}[d["type"]]
         reason, evidence_ids = d["description"], d["evidence_ids"]
     else:
         mode, evidence_ids = "directions", []
@@ -28,8 +29,13 @@ def select_support(state, latest_action="", has_candidates=False, initial=False)
     focus = {"browse": "selected_direction", "concept": "current_concept", "connection": "current_connection", "compare": "existing_candidates",
              "literature": "current_literature", "formulate": "research_problem"}.get(mode, "direction_options")
     concept_pending = mode == "concept" and state.get("recommendation_intent") != "generate" and any(
-        h.get("type") == "concept" and h.get("lifecycle") in {"active", "unconfirmed"}
+        h.get("type") == "concept" and h.get("status") == "expressed" and h.get("lifecycle") in {"active", "unconfirmed"}
         for h in state.get("difficulty_history", []))
+    targets = sorted(state.get("difficulties", []), key=lambda d: d.get("status") != "expressed") or list(reversed(pending_difficulties(state)))
+    target = targets[0] if targets else None
+    adjustment = ({"type": target["type"], "source": "pending" if target.get("lifecycle") == "unconfirmed" else target.get("source", "utterance"),
+                   "status": target.get("status"), "evidence_ids": target.get("evidence_ids", []),
+                   "evidence_quotes": target.get("evidence_quotes", []), "signals": target.get("recent_signals", target.get("signals", []))} if target else None)
     return {"version": POLICY_VERSION, "mode": mode, "reason": reason, "evidence_ids": evidence_ids,
             "breadth": breadth, "retrieve_literature": mode == "literature",
             "recommendation_action": "generate", "recommendation_focus": focus, "has_candidates": has_candidates,
@@ -37,14 +43,16 @@ def select_support(state, latest_action="", has_candidates=False, initial=False)
             "concept_difficulty_pending": concept_pending,
             "commitment_requested": state.get("commitment_requested", False),
             "detail_requested": state.get("detail_requested", False),
-            "assistance_required": mode != "directions"}
+            "support_adjustment": adjustment, "system_support_issues": state.get("support_issues", []),
+            "assistance_required": mode != "directions" or bool(adjustment and state.get("recommendation_intent") != "generate")}
 
 
 def default_next_step(plan):
     if plan.get("concept_difficulty_pending"):
         return ("이번 설명의 예시에서 이해하기 어려웠던 개념이 어떻게 쓰이는지 살펴보세요.",
                 "이해하기 어려웠던 부분을 중심으로 현재 개념과 관심의 연결을 확인할 수 있습니다.")
-    steps = {"browse": ("선택한 주제에서 각 후보가 다루는 문제와 상황의 차이를 살펴보세요.", "주제를 확정하지 않고도 어떤 측면을 더 알아볼지 검토할 수 있습니다."),
+    steps = {"orient": ("지금까지 살펴본 방향에서 남은 검토 지점을 확인해 보세요.", "새 주제를 늘리기 전에 현재 탐색의 흐름을 정리할 수 있어요."),
+             "browse": ("선택한 주제에서 각 후보가 다루는 문제와 상황의 차이를 살펴보세요.", "주제를 확정하지 않고도 어떤 측면을 더 알아볼지 검토할 수 있습니다."),
              "concept": ("이 설명을 기준으로 현재 관심에서 확인하려는 개념을 살펴보세요.", "이해를 확인한 뒤 기존 탐색을 이어갈 수 있습니다."),
              "connection": ("현재 관심과 후보가 다루는 문제의 연결을 확인해 보세요.", "관련성을 기준으로 기존 방향을 검토할 수 있습니다."),
              "compare": ("후보가 다루는 연구 문제의 차이를 비교해 보세요.", "후보 사이의 차이를 확인하며 선택 기준을 정할 수 있습니다."),

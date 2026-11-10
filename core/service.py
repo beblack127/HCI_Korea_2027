@@ -12,6 +12,8 @@ from .state import preview_state, validate_state, text, behavior_signals, OBSERV
 from .presentation import compact, enrich_state, RELATION_LABELS
 from .browse import browse_response_issues
 from .readiness import assess_readiness, offer_wrapup, session_recap
+from .behavior import topic_key, support_issues
+from .difficulty import difficulty_view, pending_difficulties
 
 
 def conversation_context(messages):
@@ -64,6 +66,8 @@ def clean_response(raw, papers, plan=None):
                 "description": compact(r.get("description"), limit=120), "rationale": text(r.get("rationale"), 350),
                 "search_query": text(r.get("search_query"), 250), "relation": relation,
                 "relation_label": RELATION_LABELS[relation]})
+    for r in result["recommendations"]:
+        r["topic_key"] = topic_key(r)
     if plan.get("assistance_required") and not body:
         raise ModelError("요청한 설명이 응답에 없습니다. 추정된 상태는 보관되어 있으니 다시 시도해 주세요.")
     if plan["recommendation_count"] and not result["recommendations"]:
@@ -101,7 +105,7 @@ def preview_response(state, plan, context, papers):
             {"title": f"{root}: 연구 범위 비교", "description": "선택한 방향에서 어떤 범위와 관점을 유지할지 검토합니다.", "rationale": "구체화하기에 따른 지원 예시입니다.", "search_query": root},
             {"title": f"{root}: 접근 방법 검토", "description": "다루려는 문제를 어떤 방식으로 연구할지 살펴봅니다.", "rationale": "구체화하기에 따른 지원 예시입니다.", "search_query": root}]
     if plan["mode"] != "directions":
-        raw["support"]["title"] = {"browse": "주제 둘러보기", "concept": "개념 설명", "connection": "관심과의 연결", "compare": "후보 비교", "formulate": "주제 구체화", "literature": "문헌 검토"}[plan["mode"]]
+        raw["support"]["title"] = {"orient": "탐색 흐름 정리", "browse": "주제 둘러보기", "concept": "개념 설명", "connection": "관심과의 연결", "compare": "후보 비교", "formulate": "주제 구체화", "literature": "문헌 검토"}[plan["mode"]]
         raw["support"]["body"] = "해당 요청이 지원 방식 선택에 반영되었습니다. 내용의 실제 생성은 Gemini 연결 후 사용할 수 있습니다."
     if papers:
         raw["support"]["paper_ids"] = [p["id"] for p in papers[:3]]
@@ -195,7 +199,8 @@ class Workspace:
                     raise ValueError("선택한 후보를 찾을 수 없습니다. 화면을 새로고침해 주세요.")
                 self.store.event(sid, "topic_browse" if action == "browse" else "topic_refine",
                     {"recommendation_id": rid, "title": candidate["title"], "description": candidate["description"],
-                     "search_query": candidate.get("search_query", "")}, request_id + ":action")
+                     "search_query": candidate.get("search_query", ""), "topic_key": topic_key(candidate),
+                     "parent_topic_key": candidate.get("parent_topic_key", ""), "relation": candidate.get("relation", "")}, request_id + ":action")
                 display = candidate["title"] + (" · 둘러보기" if action == "browse" else " · 구체화하기")
             else:
                 if not message:
@@ -219,7 +224,7 @@ class Workspace:
             available = next((m["content"]["recommendations"] for m in reversed(messages)
                               if m["role"] == "assistant" and m["content"].get("recommendations")), [])
             context = {"events": selected, "prior_estimate": prior["state"] if prior else None,
-                       "behavior_signals": behavior_signals(selected),
+                       "behavior_signals": behavior_signals(observations), "support_issues": support_issues(observations),
                        "messages": conversation_context(messages), "available_directions": available, "latest_action": action,
                        "latest_input": display, "selected_direction": candidate,
                        "context_window": {"total_events": len(observations), "observed_events": len(observed_events),
@@ -240,7 +245,7 @@ class Workspace:
             elif self.settings.live:
                 criteria = json.loads((self.settings.root / "config/state_criteria.json").read_text(encoding="utf-8"))
                 raw_state = self.llm.generate(self.prompt("estimate"), dict(context, criteria=criteria), schema="estimate")
-                state, warnings = validate_state(raw_state, selected, prior["state"] if prior else None)
+                state, warnings = validate_state(raw_state, selected, prior["state"] if prior else None, trace=observations)
             else:
                 state = preview_state(observations, prior["state"] if prior else None)
             state = enrich_state(state, observations, prior["state"] if prior else None)
@@ -295,8 +300,8 @@ class Workspace:
         self.store.put_estimate(sid, request_id, event["id"], state, plan, provenance)
         self.store.add_message(sid, request_id + ":user", "user", {"text": "이번 탐색 정리하기", "action": "wrapup", "request_id": request_id})
         response = {"response_format": "11.10-v3", "state_summary": state["chat_summary"], "support_mode": "wrapup",
-                    "mode": "gemini" if self.settings.live else "preview", "difficulty_status": state["difficulty_status"],
-                    "difficulty_types": [d["type"] for d in state["difficulties"]], "answer": "",
+                    "mode": "gemini" if self.settings.live else "preview", "difficulty_status": difficulty_view(state),
+                    "difficulty_types": [d["type"] for d in (state["difficulties"] or pending_difficulties(state))], "answer": "",
                     "assistance": {"title": "", "body": "", "papers": []}, "recap": recap, "recommendations": [],
                     "recommendation_action": "complete", "next_step": state["next_step"], "next_step_reason": state["next_step_reason"],
                     "elapsed_seconds": self.get_progress(sid, request_id)["elapsed_seconds"]}
@@ -360,19 +365,23 @@ class Workspace:
         else:
             response = preview_response(state, plan, context, papers)
         response.update({"state_summary": state.get("chat_summary", state["summary"]), "mode": "gemini" if self.settings.live else "preview",
-                         "difficulty_status": state["difficulty_status"],
-                         "difficulty_types": [d["type"] for d in state["difficulties"]],
+                         "difficulty_status": difficulty_view(state),
+                         "difficulty_types": [d["type"] for d in (state["difficulties"] or pending_difficulties(state))],
                          "support_mode": plan["mode"], "retrieval_error": retrieval_error})
         wrapup_offer = offer_wrapup(state, plan)
         if wrapup_offer:
             response["wrapup_offer"] = wrapup_offer
+        if candidate:
+            for r in response["recommendations"]:
+                r.update(parent_topic_key=topic_key(candidate), parent_recommendation_id=candidate["id"])
         state["next_step"] = response["next_step"]
         state["next_step_reason"] = response["next_step_reason"]
         state["recommendation_context"] = [{k: r[k] for k in ("id", "title", "relation_label", "rationale")} for r in response["recommendations"]]
         state["response_status"] = "completed"
         for difficulty in state.get("difficulty_history", []):
-            support_kind = {"concept": "concept", "connection": "connection", "compare": "selection", "formulate": "formulation"}.get(plan["mode"])
-            if difficulty["lifecycle"] == "active" and difficulty["type"] == support_kind:
+            support_kind = {"concept": "concept", "connection": "connection", "compare": "selection", "formulate": "formulation", "orient": "unspecified"}.get(plan["mode"])
+            adjustment = plan.get("support_adjustment") or {}
+            if difficulty["lifecycle"] in {"active", "unconfirmed"} and difficulty["type"] in {support_kind, adjustment.get("type")}:
                 difficulty.update(support_provided=True, support_request_id=request_id, support_mode=plan["mode"])
         self.set_progress(sid, request_id, "saving")
         with self.progress_guard:
@@ -387,6 +396,7 @@ class Workspace:
         self.store.add_message(sid, request_id + ":assistant", "assistant", response)
         self.store.event(sid, "agent_response", {"request_id": request_id, "state_summary": response["state_summary"],
             "offered_options": response["recommendations"], "support_mode": plan["mode"],
+            "assistance_excerpt": response.get("assistance", {}).get("body", ""),
             "estimate_through_event_id": through, "provenance": provenance}, request_id + ":response")
         result = {"response": response, "request_id": request_id}
         self.store.finish_turn(sid, request_id, result)

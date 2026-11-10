@@ -13,11 +13,15 @@ current_direction은 실제 사용자 입력과 선택에서 드러난 범위만
 support_request는 이번 입력이 요청하는 도움: directions/concept/connection/compare/formulate/literature. evidence_ids에는 최신 user_input을 참조한다.
 '대화 상태 추적이 뭐야?', '예시로 설명해줘', '왜 추천했어?', '후보를 비교해줘', '다른 주제는 없어?'는 도움 또는 방향 요청이다. 이것만으로 difficulties를 만들지 않는다.
 '설명을 봐도 이해가 안 돼'는 concept, '이 후보가 내 관심과 어떻게 연결되는지 모르겠어'는 connection, '뭘 골라야 할지 모르겠어'는 selection, '이걸 연구 문제로 어떻게 구체화할지 모르겠어'는 formulation의 직접 어려움 표현이다.
+표현의 의미를 읽으며 '어렵다'라는 단어를 요구하지 않는다. '후보 차이가 안 와닿아'는 selection, '설명이 머리에 안 들어와'는 concept으로 볼 수 있다. '빙빙 도는 느낌', '지금 뭘 하고 있는지 모르겠어', '아직 막막해'처럼 어려움은 표현했으나 원인이 불분명하면 type=unspecified, status=expressed로 두고 네 유형 중 하나를 강제로 고르지 않는다. 부정·가정·다른 사람의 경험·연구 대상의 어려움을 본인 경험으로 바꾸지 않는다.
+connection은 현재 자신의 관심·연구 문제와 추천의 관련성에 관한 어려움이다. '임베딩을 사용자 의도와 어떻게 연결하는지 모르겠어'처럼 기술 요소의 결합·작동 원리를 이해하는 문제는 concept이다. '연결'이라는 단어만으로 connection을 선택하지 않는다.
 각 difficulty는 evidence_ids와 evidence_quotes(event_id, 실제 원문의 정확한 quote)를 포함한다. 직접 표현은 expressed. 행동만으로 expressed를 만들지 않는다.
-behavior_signals는 서버가 관찰한 약한 패턴이다. 합리적인 비교일 수도 있으므로 반복 선택·검색만으로 어려움을 만들지 않는다. 여러 행동과 기존 대화의 미해결 맥락이 함께 뒷받침될 때만 possible을 사용하며 원래 대화의 evidence_quotes도 제공한다. 하나의 논문 열람/저장, 오래 머무르기, 패널 열기는 어려움·이해·확정의 근거가 아니다. 근거가 모호하면 difficulties=[]와 unknown을 사용한다.
+behavior_signals는 선택·실행을 묶고 제목을 정규화한 서버 관찰이다. 반복 선택 하나로 어려움을 만들지 않는다. 서로 다른 종류(family)의 단서가 같은 지원을 가리키고 최신 행동이 포함된 경우에만 possible을 제안한다. 행동 기반 possible은 해당 사용자 이벤트의 evidence_ids를 제공하고 evidence_quotes는 비워도 된다. 직접 어려움 발화는 필수가 아니다. 서버는 복수 종류의 단서·최신성·사용자 이벤트 근거를 다시 검사한다. 하나의 논문 열람/저장, 오래 머무르기, 패널 열기는 근거가 아니다. 단서가 모호하면 판단 유보한다.
+support_issues의 후보 반복은 시스템 응답의 문제다. 이를 사용자의 어려움·이해 부족으로 바꾸지 않는다. 시스템 오류 뒤 성공 응답 없이 반복 전송된 요청과 대기 시간은 어려움 신호로 삼지 않는다.
 
 [어려움의 변화]
 이전 difficulty_history의 id를 유지해 참조한다. 이전 어려움을 새로 관찰하지 못했으면 해소됐다고 하지 말고 unconfirmed로 둔다. 서버는 새 근거가 없는 이전 어려움을 '후속 확인 전'으로 보관한다.
+이전에 표현한 어려움은 pending_difficulties로 현재 패널에도 표시된다. 같은 과거 발화를 다시 인용해 새로운 expressed를 만들지 않는다. 새로운 선택이나 구체화하기 자체는 해소 근거가 아니다. 관련된 도움은 현재 요청 안에서 제공하며 매번 자기보고·추가 선택을 요구하지 않는다.
 사용자가 이후 발화에서 해당 어려움의 해소를 명확히 드러낼 때만 difficulty_updates에 outcome=resolved와 정확한 evidence_quotes를 기록한다. '고마워', 논문 저장, 에이전트 설명 제공만으로 해결을 판단하지 않는다. 여러 어려움이 있으면 어느 어려움에 대한 확인인지 구분한다.
 topic_relation은 same/changed/uncertain. 주제 변경은 실제 최신 사용자 발화·선택의 topic_evidence_ids로 뒷받침한다. 단순한 표현 변경이나 같은 문제의 구체화를 주제 변경으로 보지 않는다. 변경은 해결과 다르다.
 

@@ -382,3 +382,44 @@ test('wrapup recap escapes content and offers no fresh candidates or old-candida
   assert.match(last,/아직 확인할 점/);
   assert.doesNotMatch(last,/class="recommendations"|data-previous-candidates/);
 });
+
+test('pending expressed difficulty remains visible without claiming current difficulty',async()=>{
+  const h=await harness(),snap=seed();
+  snap.events=[{id:1,type:'user_input',payload:{text:'임베딩 반영 원리를 모르겠어'}}];
+  const pending={id:'d',type:'concept',status:'expressed',lifecycle:'unconfirmed',evidence_ids:[1],
+    evidence_quotes:[{event_id:1,quote:'임베딩 반영 원리를 모르겠어'}]};
+  snap.estimate={through_event_id:1,state:{difficulties:[],pending_difficulties:[pending],difficulty_history:[pending]}};
+  snap.messages=[{id:1,role:'assistant',content:{difficulty_status:'unconfirmed',state_summary:'해소 여부는 아직 확인되지 않았어요.',recommendations:[]}}];
+  h.qa.renderSnapshot(snap);
+  assert.equal(h.elements.get('statePane').dataset.difficulty,'unconfirmed');
+  assert.equal(h.elements.get('difficultyBadge').hidden,false);
+  assert.match(h.elements.get('difficultyBadge').textContent,/후속 확인 전/);
+  assert.match(h.elements.get('difficultyList').innerHTML,/임베딩 반영 원리/);
+  assert.match(h.elements.get('messages').innerHTML,/data-difficulty="unconfirmed"/);
+  assert.doesNotMatch(h.elements.get('difficultyList').innerHTML,/현재도 어렵/);
+});
+
+test('unspecified experience displays an acknowledged difficulty without forcing a type',async()=>{
+  const h=await harness(),snap=seed();
+  snap.estimate={through_event_id:1,state:{difficulties:[{id:'u',type:'unspecified',status:'expressed',
+    description:'탐색에서 어려움을 표현했어요. 어떤 유형인지는 아직 판단하지 않았어요.',evidence_ids:[1]}]}};
+  snap.events=[{id:1,type:'user_input',payload:{text:'계속 빙빙 도는 느낌이야'}}];
+  h.qa.renderSnapshot(snap);
+  assert.match(h.elements.get('difficultyBadge').textContent,/유형 판단 유보/);
+  assert.match(h.elements.get('difficultyList').innerHTML,/빙빙 도는 느낌/);
+  assert.equal(h.elements.get('statePane').dataset.difficulty,'expressed');
+});
+
+test('behavioral support and system repetition show evidence without extra choices',async()=>{
+  const h=await harness(),snap=seed();
+  snap.estimate={through_event_id:3,state:{difficulties:[{type:'concept',status:'possible',evidence_ids:[1,2,3],
+    description:'설명 지원이 필요할 가능성이 있어요.',signals:[{observation:'다른 설명 방식을 요청했어요.'}]}],
+    support_issues:[{observation:'같은 후보 목록이 제공됐어요. 시스템 추천의 반복으로 기록했어요.'}]}};
+  snap.messages=[{id:1,role:'assistant',content:{difficulty_status:'possible',recommendations:[{id:'r',title:'현재 관심',description:'설명'}]}}];
+  h.qa.renderSnapshot(snap);
+  assert.match(h.elements.get('difficultyList').innerHTML,/다른 설명 방식/);
+  assert.match(h.elements.get('supportIssueList').innerHTML,/시스템 추천의 반복/);
+  const output=h.elements.get('messages').innerHTML;
+  assert.match(output,/data-action="browse"/);assert.match(output,/data-action="refine"/);
+  assert.doesNotMatch(output,/data-action="(?:compare|orient|help)"|차이 정리하기|계속 둘러보기/);
+});

@@ -2,6 +2,7 @@
 import json
 import sqlite3
 import uuid
+from .difficulty import difficulty_view, pending_difficulties
 from datetime import datetime, timezone
 from pathlib import Path
 from contextlib import contextmanager
@@ -107,8 +108,8 @@ class Store:
             # This projection does not rewrite the original messages or estimate history.
             if r["role"] == "assistant" and request_id in states:
                 state = states[request_id]
-                content = dict(content, difficulty_status=state.get("difficulty_status", "unknown"),
-                               difficulty_types=[d["type"] for d in state.get("difficulties", [])])
+                content = dict(content, difficulty_status=difficulty_view(state),
+                               difficulty_types=[d["type"] for d in (state.get("difficulties", []) or pending_difficulties(state))])
             messages.append({"id": r["id"], "request_id": request_id, "role": r["role"],
                              "created_at": r["created_at"], "content": content})
         return messages
