@@ -423,3 +423,30 @@ test('behavioral support and system repetition show evidence without extra choic
   assert.match(output,/data-action="browse"/);assert.match(output,/data-action="refine"/);
   assert.doesNotMatch(output,/data-action="(?:compare|orient|help)"|차이 정리하기|계속 둘러보기/);
 });
+
+test('observed narrowing remains visible when an explicit research problem is unconfirmed',async()=>{
+  const h=await harness(),snap=seed();
+  snap.estimate={state:{direction_stage:'unknown',current_direction:'오래된 넓은 관심의 설명',summary:'범위를 좁혀 검토하고 있어요. 연구 문제의 명시 여부와 별개예요.',
+    exploration_progress:{status:'narrowing',label:'범위 좁혀 검토 중',focus:'질문을 되물을 확신도 임계값',problem_status:'unconfirmed'},
+    difficulties:[],difficulty_status:'unknown'},through_event_id:1,created_at:new Date().toISOString()};
+  h.qa.renderSnapshot(snap);
+  assert.equal(h.elements.get('stageLabel').textContent,'범위 좁혀 검토 중');
+  assert.equal(h.elements.get('currentDirection').textContent,'질문을 되물을 확신도 임계값');
+  assert.equal(h.elements.get('problemSection').hidden,true);
+  assert.equal(h.elements.get('difficultyBadge').hidden,true);
+});
+
+test('focus correction has its own visible change without requiring a difficulty badge',async()=>{
+  const h=await harness(),snap=seed();
+  snap.estimate={state:{direction_stage:'unknown',current_direction:'이해도 측정',summary:'새 관점을 반영해 검토하고 있어요.',
+    exploration_progress:{status:'revising',label:'관점 조정 중',focus:'모호한 표현의 의도 해석'},
+    recent_change:'이해도 측정보다 모호한 표현의 의도 해석을 살펴보려는 정정이 드러났어요.',
+    clarified_aspects:[{kind:'perspective',text:'모호한 표현의 의도 해석',evidence_ids:[2]}],
+    difficulties:[],difficulty_status:'unknown'},through_event_id:2,created_at:new Date().toISOString()};
+  h.qa.renderSnapshot(snap);
+  assert.equal(h.elements.get('stageLabel').textContent,'관점 조정 중');
+  assert.equal(h.elements.get('currentDirection').textContent,'모호한 표현의 의도 해석');
+  assert.match(h.elements.get('recentChange').textContent,/정정/);
+  assert.doesNotMatch(h.elements.get('clarifiedAspects').innerHTML,/이해도 측정/);
+  assert.equal(h.elements.get('difficultyBadge').hidden,true);
+});

@@ -22,6 +22,10 @@ SCHEMAS = {
     "estimate": obj({
         "direction_stage": string(["exploring", "forming", "unknown"]),
         "current_direction": string(), "research_problem": string(), "problem_evidence": quotes,
+        "problem_basis": obj({"kind": string(["none", "phenomenon", "relationship", "design_goal"]),
+                              "subject": string(), "focus": string(), "context": string(), "event_id": {"type": "integer"}}),
+        "focus_update": obj({"operation": string(["none", "add", "refine", "replace", "compare"]),
+                             "previous_focus": string(), "current_focus": string(), "evidence_quotes": quotes}),
         "summary": string(), "recent_change": string(),
         "clarified_aspects": array(obj({"kind": string(["interest", "problem", "perspective", "scope"]), "evidence_quotes": quotes})),
         "difficulty_status": string(["unknown", "possible", "expressed", "clear"]),

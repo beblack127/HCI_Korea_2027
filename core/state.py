@@ -3,6 +3,7 @@ import copy
 import re
 from .behavior import behavior_signals, support_bundles, support_issues, request_type
 from .difficulty import LABELS as DIFFICULTY_LABELS, negative_experience, difficulty_kind, guess_kind, technical_connection, pending_difficulties
+from .progress import validated_focus_update, correction_request, grounded_span
 
 OBSERVATIONS = {"user_input", "topic_select", "topic_browse", "topic_refine", "paper_search_submit",
                 "abstract_expand", "abstract_collapse", "paper_open", "paper_save", "paper_unsave", "session_wrapup"}
@@ -58,12 +59,25 @@ def _anchors(value):
     return {next((t[:-len(s)] for s in endings if t.endswith(s) and len(t) - len(s) >= 2), t) for t in tokens}
 
 
-def _problem_supported(problem, quote):
+def _problem_supported(problem, quote, basis=None):
     # Exact quotes are not semantic proof. Reject keywords, generic help and unanchored reconstructions.
     substantive = r"영향|차이|관계|한계|효과|변화|변하는|방해|실패|오해|불일치|오류|의도.{0,5}전이|어떻게.{2,30}(?:달라|미치|지원)"
     commitment = r"연구|다루|알아보|확인|보고\s*싶|비교|탐구|검증|어떻게|왜|미치는|변하는|영향"
     common = (_anchors(problem) & _anchors(quote)) - {"연구", "주제", "문제", "질문", "범위", "관심", "방법", "어떻게", "구체화"}
-    return len(quote) >= 12 and len(common) >= 2 and bool(re.search(substantive, quote) and re.search(commitment, quote))
+    if len(quote) < 12 or len(common) < 2:
+        return False
+    if basis and basis.get("kind") in {"phenomenon", "relationship", "design_goal"}:
+        subject, focus = text(basis.get("subject")), text(basis.get("focus"))
+        context = text(basis.get("context"))
+        if basis["kind"] in {"phenomenon", "design_goal"} and not (
+                len(context) >= 3 and context in quote and context != focus and context not in subject):
+            return False
+        # Semantic role assignment is model-proposed; exact, distinct source spans
+        # anchor it. Causal/effect vocabulary is not required for a phenomenon.
+        return (len(subject) >= 2 and len(re.sub(r"\s", "", focus)) >= 6 and subject != focus
+                and subject in quote and focus in quote and focus not in {"연구 주제 구체화", "연구 문제 정하기"}
+                and not re.search(r"(?:추천|설명|정리|구체화).{0,5}해\s*줘|어떻게.{0,12}(?:정하|구체화)|모르겠", quote))
+    return bool(re.search(substantive, quote) and re.search(commitment, quote))
 
 
 def _problem_excerpt(quote):
@@ -155,10 +169,20 @@ def validate_state(raw, events, previous=None, trace=None):
     state["unresolved"] = [text(x, 180) for x in (raw.get("unresolved") or [])[:4] if isinstance(x, str)]
     problem = text(raw.get("research_problem"), 350)
     refs = quoted_evidence(raw.get("problem_evidence"), allowed)
-    refs = [r for r in refs if _problem_supported(problem, r["quote"])]
+    basis = copy.deepcopy(raw.get("problem_basis") or {})
+    basis_ref = next((r for r in refs if r["event_id"] == basis.get("event_id")), None)
+    if basis_ref:
+        for field in ("subject", "focus", "context"):
+            basis[field] = grounded_span(basis.get(field), basis_ref["quote"], context=field == "context")
+    refs = [r for r in refs if _problem_supported(problem, r["quote"], basis if basis.get("event_id") == r["event_id"] else None)]
     if problem and refs:
-        state.update(research_problem=_problem_excerpt(min(refs, key=lambda r: len(r["quote"]))["quote"]),
+        quote = min(refs, key=lambda r: len(r["quote"]))["quote"]
+        if basis.get("kind") in {"phenomenon", "relationship", "design_goal"} and basis.get("focus"):
+            quote = next((c.strip() for c in re.split(r"[?!。]|(?:이|가)?\s*아니라|말고|보다는", quote)
+                          if basis["focus"] in c and basis.get("subject", "") in c), quote)
+        state.update(research_problem=_problem_excerpt(quote),
                      problem_evidence=refs, problem_evidence_ids=[r["event_id"] for r in refs])
+        state["problem_basis"] = basis
     if state["direction_stage"] == "forming" and not state["research_problem"]:
         state["direction_stage"] = "unknown"
         warnings.append("forming_without_grounded_problem")
@@ -192,6 +216,8 @@ def validate_state(raw, events, previous=None, trace=None):
     action_shift = latest and latest["type"] == "topic_browse" and latest["payload"].get("title") != (previous or {}).get("current_direction")
     changed = raw.get("topic_relation") == "changed" and latest_id in topic_ids and (explicit_shift or action_shift)
     state["topic_relation"] = "changed" if changed else ("same" if raw.get("topic_relation") == "same" else "uncertain")
+    state["focus_update"] = validated_focus_update(raw, events, previous)
+    state["correction_requested"] = correction_request(content)
     if changed and state["research_problem"] and latest_id not in state["problem_evidence_ids"]:
         state.update(research_problem="", problem_evidence=[], problem_evidence_ids=[])
         if state["direction_stage"] == "forming":

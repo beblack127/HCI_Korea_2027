@@ -129,9 +129,11 @@ function renderSnapshot(value, updateMessages=true) {
 
 function renderState() {
   const estimate=snapshot.estimate, state=estimate?.state;
-  $('stageLabel').textContent=state ? stateLabels[state.direction_stage] || '판단 유보' : '탐색 전';
-  $('stageLabel').classList.toggle('neutral',!state||state.direction_stage==='unknown');
-  $('currentDirection').textContent=state?.current_direction || '관심에서 출발해 보세요';
+  const progress=state?.exploration_progress;
+  const observedProgress=progress&&['reviewing','narrowing','revising'].includes(progress.status);
+  $('stageLabel').textContent=observedProgress?progress.label:state ? stateLabels[state.direction_stage] || '판단 유보' : '탐색 전';
+  $('stageLabel').classList.toggle('neutral',!observedProgress&&(!state||state.direction_stage==='unknown'));
+  $('currentDirection').textContent=(observedProgress?progress.focus:'') || state?.current_direction || '관심에서 출발해 보세요';
   $('stateSummary').textContent=state?.summary || '대화와 선택을 바탕으로 현재 탐색을 정리합니다.';
   $('problemSection').hidden=!state?.research_problem;
   $('researchProblem').textContent=state?.research_problem||'';
