@@ -1,7 +1,7 @@
 """Researcher-controlled support policy; the model cannot override this table."""
 
 
-POLICY_VERSION = "11.11-v1"
+POLICY_VERSION = "11.11-v2"
 
 
 def select_support(state, latest_action="", has_candidates=False, initial=False):

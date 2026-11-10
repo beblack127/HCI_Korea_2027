@@ -1,3 +1,4 @@
+import copy
 import hashlib
 import json
 import re
@@ -10,6 +11,7 @@ from .search import OpenAlex, SearchError
 from .state import preview_state, validate_state, text, behavior_signals, OBSERVATIONS
 from .presentation import compact, enrich_state, RELATION_LABELS
 from .browse import browse_response_issues
+from .readiness import assess_readiness, offer_wrapup, session_recap
 
 
 def conversation_context(messages):
@@ -25,6 +27,8 @@ def conversation_context(messages):
                        "recommendations": c.get("recommendations", []),
                        "support": {"title": support.get("title", ""), "body": text(support.get("body"), 1800),
                                    "papers": [{"id": p["id"], "title": p["title"]} for p in support.get("papers", [])]}}
+            if c.get("recap"):
+                content["recap"] = c["recap"]
         compact.append({"role": m["role"], "content": content})
     return compact
 
@@ -177,6 +181,8 @@ class Workspace:
                 return dict(cached, snapshot=self.store.snapshot(sid))
             message = text(payload.get("text"), 4000)
             action = payload.get("action", "message")
+            if action == "wrapup":
+                return self._wrapup(sid, payload, request_id)
             candidate = None
             if action not in {"message", "browse", "refine"}:
                 raise ValueError("지원하지 않는 탐색 행동입니다.")
@@ -238,6 +244,7 @@ class Workspace:
             else:
                 state = preview_state(observations, prior["state"] if prior else None)
             state = enrich_state(state, observations, prior["state"] if prior else None)
+            state["readiness"] = assess_readiness(state, observations, prior["state"] if prior else None)
             has_candidates = any(m["role"] == "assistant" and m["content"].get("recommendations") for m in self.store.messages(sid))
             initial = len([e for e in selected if e["type"] == "user_input"]) == 1 and action == "message" and not has_candidates
             plan = select_support(state, action, has_candidates=has_candidates, initial=initial)
@@ -255,6 +262,51 @@ class Workspace:
                 state["response_error"] = str(exc) if isinstance(exc, (ModelError, SearchError)) else "답변 생성을 마치지 못했습니다."
                 self.store.put_estimate(sid, request_id, through, state, plan, provenance)
                 raise
+
+    def _wrapup(self, sid, payload, request_id):
+        prior = self.store.latest_estimate(sid)
+        readiness = (prior["state"].get("readiness") or {}) if prior else {}
+        signature = payload.get("readiness_signature")
+        pending_intent = prior and any(e["id"] > prior["through_event_id"] and e["type"] in {"user_input", "topic_browse", "topic_refine"}
+                                       for e in self.store.events(sid))
+        if (not signature or signature != readiness.get("signature") or readiness.get("status") != "ready"
+                or signature not in readiness.get("offered_signatures", [])
+                or signature in readiness.get("confirmed_signatures", [])
+                or pending_intent
+                or prior["state"].get("response_status") != "completed"):
+            raise ValueError("현재 탐색에서 제안된 정리를 확인할 수 없습니다. 최신 탐색 내용을 확인해 주세요.")
+        state = copy.deepcopy(prior["state"])
+        self.set_progress(sid, request_id, "saving")
+        event = self.store.event(sid, "session_wrapup", {"title": state["research_problem"],
+            "readiness_signature": signature, "source_request_id": prior["request_id"]}, request_id + ":action")
+        recap = session_recap(state)
+        state["readiness"]["confirmed_signatures"] = (readiness.get("confirmed_signatures", []) + [signature])[-12:]
+        state["readiness"].update(status="confirmed", summary=recap, confirmed_event_id=event["id"],
+            message="사용자가 이번 탐색의 잠정 정리를 선택했어요.")
+        state.update(response_status="completed", recent_change="이번 탐색에서 드러난 연구 방향을 잠정 정리했어요.",
+                     change_evidence_ids=[event["id"]], chat_summary="이번 탐색에서 살펴본 연구 방향을 잠정 정리했어요.",
+                     next_step=recap["next_checks"][0], next_step_reason="관련 문헌과 대조하며 현재 연구 방향을 더 검토할 수 있어요.")
+        state.pop("response_error", None)
+        state["recommendation_context"] = []
+        plan = {"version": POLICY_VERSION, "mode": "wrapup", "recommendation_count": 0,
+                "recommendation_action": "complete", "retrieve_literature": False}
+        provenance = dict(self.provenance(), source_request_id=prior["request_id"], model_calls=0,
+                          summary_method="validated_state_projection")
+        self.store.put_estimate(sid, request_id, event["id"], state, plan, provenance)
+        self.store.add_message(sid, request_id + ":user", "user", {"text": "이번 탐색 정리하기", "action": "wrapup", "request_id": request_id})
+        response = {"response_format": "11.10-v3", "state_summary": state["chat_summary"], "support_mode": "wrapup",
+                    "mode": "gemini" if self.settings.live else "preview", "difficulty_status": state["difficulty_status"],
+                    "difficulty_types": [d["type"] for d in state["difficulties"]], "answer": "",
+                    "assistance": {"title": "", "body": "", "papers": []}, "recap": recap, "recommendations": [],
+                    "recommendation_action": "complete", "next_step": state["next_step"], "next_step_reason": state["next_step_reason"],
+                    "elapsed_seconds": self.get_progress(sid, request_id)["elapsed_seconds"]}
+        self.store.add_message(sid, request_id + ":assistant", "assistant", response)
+        self.store.event(sid, "agent_response", {"request_id": request_id, "support_mode": "wrapup",
+            "state_summary": state["chat_summary"], "offered_options": [], "estimate_through_event_id": event["id"],
+            "provenance": provenance}, request_id + ":response")
+        result = {"response": response, "request_id": request_id}
+        self.store.finish_turn(sid, request_id, result)
+        return dict(result, snapshot=self.store.snapshot(sid))
 
     def _respond(self, sid, request_id, through, state, plan, provenance, context, action, display, candidate):
         papers, retrieval_error = [], ""
@@ -311,6 +363,9 @@ class Workspace:
                          "difficulty_status": state["difficulty_status"],
                          "difficulty_types": [d["type"] for d in state["difficulties"]],
                          "support_mode": plan["mode"], "retrieval_error": retrieval_error})
+        wrapup_offer = offer_wrapup(state, plan)
+        if wrapup_offer:
+            response["wrapup_offer"] = wrapup_offer
         state["next_step"] = response["next_step"]
         state["next_step_reason"] = response["next_step_reason"]
         state["recommendation_context"] = [{k: r[k] for k in ("id", "title", "relation_label", "rationale")} for r in response["recommendations"]]

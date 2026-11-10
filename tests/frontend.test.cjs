@@ -344,3 +344,41 @@ test('complete explanation can be expanded without making the default response l
   assert.match(h.elements.get('messages').innerHTML,/<details class="help-details" open>/);
   assert.doesNotMatch(html,/<details[^>]*id="evidenceSection"[^>]*\sopen/);
 });
+
+test('ready session exposes one wrapup action and hides stale or confirmed offers',async()=>{
+  const h=await harness(),snap=seed();
+  snap.estimate={through_event_id:2,created_at:new Date().toISOString(),state:{readiness:{status:'ready',signature:'current',message:'문제와 범위를 정리할 수 있어요.',checks:[{label:'연구할 문제',met:true}]},difficulties:[]}};
+  snap.messages=[{id:1,role:'assistant',created_at:new Date().toISOString(),content:{wrapup_offer:{signature:'current',message:'이번 탐색을 잠정 정리할 수 있어요.'},recommendations:[]}}];
+  h.qa.renderSnapshot(snap);
+  assert.equal((h.elements.get('messages').innerHTML.match(/data-wrapup=/g)||[]).length,1);
+  assert.doesNotMatch(h.elements.get('messages').innerHTML,/차이 정리하기|계속 둘러보기/);
+  assert.equal(h.elements.get('readinessSection').hidden,false);
+  assert.match(h.elements.get('readinessChecks').innerHTML,/연구할 문제 · 기록 확인/);
+  snap.events=[{id:3,type:'user_input',payload:{text:'다른 주제로 바꿀래'}}];h.qa.renderSnapshot(snap);
+  assert.doesNotMatch(h.elements.get('messages').innerHTML,/data-wrapup=/);
+  snap.events=[];snap.estimate.state.readiness.status='confirmed';h.qa.renderSnapshot(snap);
+  assert.doesNotMatch(h.elements.get('messages').innerHTML,/data-wrapup=/);
+  snap.estimate.state.readiness.status='ready';snap.estimate.state.readiness.confirmed_signatures=['current'];h.qa.renderSnapshot(snap);
+  assert.doesNotMatch(h.elements.get('messages').innerHTML,/data-wrapup=/);
+});
+
+test('wrapup sends explicit signature and immediately displays the correct user bubble',async()=>{
+  const h=await harness();
+  const pending=h.qa.sendTurn({action:'wrapup',readiness_signature:'current'});await settle();
+  assert.match(h.elements.get('messages').innerHTML,/이번 탐색 정리하기/);
+  assert.doesNotMatch(h.elements.get('messages').innerHTML,/선택한 주제 · 둘러보기/);
+  assert.equal(h.requests.find(r=>r.url==='/api/turn').body.readiness_signature,'current');
+  h.finishTurn();await pending;
+});
+
+test('wrapup recap escapes content and offers no fresh candidates or old-candidate fallback',async()=>{
+  const h=await harness(),snap=seed();
+  snap.messages=[{id:1,role:'assistant',created_at:new Date().toISOString(),content:{recommendations:[{id:'r',title:'이전 방향'}]}},
+    {id:2,role:'assistant',created_at:new Date().toISOString(),content:{response_format:'11.10-v3',recommendations:[],recommendation_action:'complete',
+      recap:{title:'잠정 연구 방향',research_problem:'<script>unsafe</script>',aspects:[{text:'학술 탐색'}],reviewed_directions:[],remaining_questions:['비교할 문구'],next_checks:['문헌과 대조'],note:'탐색을 이어갈 수 있어요.'}}}];
+  h.qa.renderSnapshot(snap);
+  const last=h.elements.get('messages').innerHTML.split('data-message-id="2"')[1];
+  assert.match(last,/&lt;script&gt;unsafe&lt;\/script&gt;/);
+  assert.match(last,/아직 확인할 점/);
+  assert.doesNotMatch(last,/class="recommendations"|data-previous-candidates/);
+});

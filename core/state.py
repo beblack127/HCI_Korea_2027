@@ -3,12 +3,12 @@ import copy
 import re
 
 OBSERVATIONS = {"user_input", "topic_select", "topic_browse", "topic_refine", "paper_search_submit",
-                "abstract_expand", "abstract_collapse", "paper_open", "paper_save", "paper_unsave"}
+                "abstract_expand", "abstract_collapse", "paper_open", "paper_save", "paper_unsave", "session_wrapup"}
 DIFFICULTY_LABELS = {"concept": "개념 이해", "connection": "관심과의 연결", "selection": "후보 선택", "formulation": "주제 구체화"}
 STAGE_LABELS = {"exploring": "방향 탐색", "forming": "방향 형성", "unknown": "판단 유보"}
 ACTION_LABELS = {"topic_select": "후보 선택", "topic_browse": "둘러보기 선택", "topic_refine": "구체화하기 선택",
                  "paper_search_submit": "논문 검색", "abstract_expand": "초록 펼치기", "abstract_collapse": "초록 접기",
-                 "paper_open": "원문 링크 열기", "paper_save": "관심 논문에 담기", "paper_unsave": "관심 논문에서 빼기"}
+                 "paper_open": "원문 링크 열기", "paper_save": "관심 논문에 담기", "paper_unsave": "관심 논문에서 빼기", "session_wrapup": "탐색 정리 선택"}
 
 
 def empty_state():

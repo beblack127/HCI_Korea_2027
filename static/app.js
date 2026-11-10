@@ -3,8 +3,8 @@ const $ = id => document.getElementById(id);
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const stateLabels = {exploring:'방향 탐색',forming:'방향 형성',unknown:'판단 유보'};
 const difficultyLabels = {concept:'개념 이해',connection:'관심과의 연결',selection:'후보 선택',formulation:'주제 구체화'};
-const supportLabels = {directions:'다음 탐색 방향',browse:'주제 둘러보기',concept:'개념 설명',connection:'관심과의 연결',compare:'후보 비교',formulate:'주제 구체화',literature:'문헌 검토'};
-const historyLabels = {user_input:'질의 입력',topic_browse:'둘러보기',topic_refine:'구체화하기',paper_search_submit:'논문 검색',abstract_expand:'초록 펼치기',abstract_collapse:'초록 접기',paper_open:'원문 링크 열기',paper_save:'관심 논문에 담기',paper_unsave:'관심 논문에서 빼기'};
+const supportLabels = {directions:'다음 탐색 방향',browse:'주제 둘러보기',concept:'개념 설명',connection:'관심과의 연결',compare:'후보 비교',formulate:'주제 구체화',literature:'문헌 검토',wrapup:'탐색 정리'};
+const historyLabels = {user_input:'질의 입력',topic_browse:'둘러보기',topic_refine:'구체화하기',paper_search_submit:'논문 검색',abstract_expand:'초록 펼치기',abstract_collapse:'초록 접기',paper_open:'원문 링크 열기',paper_save:'관심 논문에 담기',paper_unsave:'관심 논문에서 빼기',session_wrapup:'탐색 정리 선택'};
 let snapshot = null, status = null, busy = false, searching = false, pendingTurn = null;
 let selections = new Map(), expanded = new Set(), eventQueue = Promise.resolve(), toastTimer;
 const localTurns = new Map();
@@ -147,6 +147,10 @@ function renderState() {
   $('observedDirections').innerHTML=directions.length?`<p class="section-note observed-label">선택·검토 기록이 있는 후보</p>${directions.map(d=>`<div class="observed-direction"><span>${esc(d.action)}</span><p>${esc(d.title)}</p></div>`).join('')}`:'';
   $('flowSection').hidden=!state?.flow_summary;
   $('flowSummary').textContent=state?.flow_summary||'';
+  const readiness=state?.readiness;
+  $('readinessSection').hidden=!['ready','confirmed'].includes(readiness?.status);
+  $('readinessMessage').textContent=readiness?.message||'';
+  $('readinessChecks').innerHTML=(readiness?.checks||[]).map(c=>`<li>${esc(c.label)} · ${c.met?'기록 확인':'확인 전'}</li>`).join('');
   const pending=estimate ? snapshot.events.filter(e=>e.id>estimate.through_event_id && (historyLabels[e.type]||e.type==='topic_select')).length : 0;
   const responseNote=state?.response_status==='generating'?' · 상태 추정 완료, 답변 생성 중':state?.response_status==='error'?' · 상태 저장됨, 답변 재시도 가능':'';
   $('stateUpdated').textContent=estimate ? `${timeOf(estimate.created_at)} 대화 기준${pending ? ` · 이후 활동 ${pending}건 기록` : ''}${responseNote}` : '';
@@ -187,6 +191,16 @@ function renderState() {
   $('moreHistory')?.addEventListener('click',()=>{allHistory=true;renderState();});
 }
 
+function recapView(recap) {
+  if(!recap)return '';
+  const list=items=>items.map(s=>`<li>${esc(s)}</li>`).join('');
+  return `<section class="wrapup-summary"><h3>${esc(recap.title)}</h3><div><b>살펴본 연구 문제</b><p>${esc(recap.research_problem)}</p></div>
+    ${recap.aspects?.length?`<div><b>검토한 관점·범위</b><ul>${list(recap.aspects.map(a=>a.text))}</ul></div>`:''}
+    ${recap.reviewed_directions?.length?`<div><b>선택·검토한 방향</b><ul>${list(recap.reviewed_directions.map(d=>`${d.title} · ${d.action}`))}</ul></div>`:''}
+    ${recap.remaining_questions?.length?`<div><b>아직 확인할 점</b><ul>${list(recap.remaining_questions)}</ul></div>`:''}
+    <div><b>후속 검토</b><ul>${list(recap.next_checks||[])}</ul></div><p class="section-note">${esc(recap.note)}</p></section>`;
+}
+
 function renderMessages() {
   finishSendMotion();
   const acknowledged=new Set(snapshot.messages.filter(m=>m.role==='user').map(m=>m.request_id||m.content.request_id));
@@ -199,6 +213,9 @@ function renderMessages() {
     const recs=c.recommendations||[];
     const earlier=snapshot.messages.slice(0,messageIndex).reverse().find(p=>p.role==='assistant'&&p.content.recommendations?.length);
     const help=c.assistance;
+    const readiness=snapshot.estimate?.state?.readiness;
+    const pendingIntent=snapshot.events.some(e=>e.id>(snapshot.estimate?.through_event_id??0)&&['user_input','topic_browse','topic_refine'].includes(e.type));
+    const showWrapup=c.wrapup_offer&&!pendingIntent&&readiness?.status==='ready'&&c.wrapup_offer.signature===readiness.signature&&!readiness.confirmed_signatures?.includes(c.wrapup_offer.signature);
     const compactReply=c.response_format==='11.10-v3';
     const paperButtons=papers=>(papers||[]).map(p=>`<button class="support-paper" data-support-paper="${esc(p.id)}"><b>${esc(p.title)}</b><span>${esc(p.year||'')} · ${esc((p.authors||[]).slice(0,2).join(', '))}</span></button>`).join('');
     const helpBody=help?.details?`<details class="help-details" ${help.expanded?'open':''}><summary><span class="help-preview message-answer">${esc(help.body)}</span><span class="help-open-label">자세한 설명 보기</span><span class="help-close-label">간단히 보기</span></summary><div class="message-answer">${esc(help.details)}</div></details>`:`<div class="message-answer">${esc(help?.body)}</div>`;
@@ -208,16 +225,19 @@ function renderMessages() {
       <div class="assistant-bubble">
       <p class="message-state" data-difficulty="${['expressed','possible'].includes(c.difficulty_status)?c.difficulty_status:'unknown'}">${esc(c.state_summary)}</p>
       ${help ? (help.body||help.papers?.length?`<div class="message-help">${help.title&&!compactReply?`<h3>${esc(help.title)}</h3>`:''}${helpBody}${paperButtons(help.papers)}</div>`:'') : `<div class="message-answer">${esc(c.answer)}</div>${c.support?.title||c.support?.body?`<div class="support-block"><h3>${esc(c.support.title)}</h3><p>${esc(c.support.body)}</p>${paperButtons(c.support.papers)}</div>`:''}`}
+      ${recapView(c.recap)}
       ${c.next_step?`<div class="next-action${compactReply?' compact':''}" aria-label="다음 탐색 제안">${compactReply?'':'<h3>다음 탐색 제안</h3>'}<p>${esc(c.next_step)}</p>${c.next_step_reason&&!compactReply?`<p class="next-action-reason">${esc(c.next_step_reason)}</p>`:''}</div>`:''}
       ${c.retrieval_error?`<p class="retrieval-error">${esc(c.retrieval_error)}</p>`:''}
       ${!recs.length&&earlier&&c.recommendation_action==='preserve'?`<button class="text-button previous-candidates" data-previous-candidates="${earlier.id}">기존 탐색 후보 보기 ↑</button>`:''}
       </div>
+      ${showWrapup?`<div class="wrapup-offer"><p>${esc(c.wrapup_offer.message)}</p><button class="button" data-wrapup="${esc(c.wrapup_offer.signature)}" ${busy?'disabled':''}>탐색 정리하기</button></div>`:''}
       ${recs.length?`<div class="recommendations"><div class="rec-heading">다음으로 살펴볼 주제<span class="rec-count">${recs.length}개 후보</span></div>
       ${recs.map((r,i)=>`<div class="recommendation-row${selected===r.id?' selected':''}"><button class="recommendation" data-rec="${esc(r.id)}" data-message="${m.id}" aria-pressed="${selected===r.id}"><span class="rec-number">${String(i+1).padStart(2,'0')}</span><span><span class="rec-title">${esc(r.title)}</span><span class="rec-description">${r.relation_label?`<span class="rec-relation">${esc(r.relation_label)}</span>`:''}${esc(r.description)}</span></span><span class="rec-indicator" aria-hidden="true"></span></button>${r.search_query?`<div class="rec-search"><div><span class="rec-search-label">검색 키워드</span><span class="rec-query" lang="en">${esc(r.search_query)}</span></div><button class="rec-search-button" data-search-rec="${esc(r.id)}" ${searching?'disabled':''} aria-label="${esc(r.title)} 관련 논문 검색">논문 검색 <span aria-hidden="true">↗</span></button></div>`:''}</div>`).join('')}
       <div class="rec-actions"><span class="selection-hint">${selected?'선택한 주제로 이어갈 수 있어요':'후보를 골라 이어가세요'}</span><button class="button" data-action="browse" data-message="${m.id}" ${!selected||busy?'disabled':''}>둘러보기</button><button class="button primary" data-action="refine" data-message="${m.id}" ${!selected||busy?'disabled':''}>구체화하기</button></div></div>`:''}</article>`;
   }).join('') + local.map(t=>`<article class="message user local-message" data-client-request="${esc(t.payload.request_id)}"><div class="user-content">${esc(t.display)}</div>${t.failed?`<div class="local-message-status">전송 확인 필요 <button class="local-retry" data-retry-local="${esc(t.payload.request_id)}" ${busy?'disabled':''}>다시 보내기</button></div>`:''}</article>`).join('');
   document.querySelectorAll('[data-rec]').forEach(b=>b.addEventListener('click',()=>selectRecommendation(b.dataset.message,b.dataset.rec)));
   document.querySelectorAll('[data-action]').forEach(b=>b.addEventListener('click',()=>sendTurn({action:b.dataset.action,recommendation_id:selections.get(b.dataset.message)})));
+  document.querySelectorAll('[data-wrapup]').forEach(b=>b.addEventListener('click',()=>sendTurn({action:'wrapup',readiness_signature:b.dataset.wrapup})));
   document.querySelectorAll('[data-support-paper]').forEach(b=>b.addEventListener('click',()=>showSupportPaper(b.dataset.supportPaper)));
   document.querySelectorAll('[data-search-rec]').forEach(b=>b.addEventListener('click',()=>searchRecommendation(b.dataset.searchRec)));
   document.querySelectorAll('[data-retry-local]').forEach(b=>b.addEventListener('click',()=>sendTurn(localTurns.get(b.dataset.retryLocal)?.payload,true)));
@@ -247,7 +267,7 @@ async function sendTurn(input, retry=false) {
   if (!payload || (payload.action==='message'&&!payload.text?.trim())) return;
   const origin=payload.action==='message'&&!retry ? sendOrigin() : null;
   const rec=snapshot.messages.flatMap(m=>m.content.recommendations||[]).find(r=>r.id===payload.recommendation_id);
-  const display=payload.action==='message' ? payload.text : `${rec?.title||'선택한 주제'} · ${payload.action==='refine'?'구체화하기':'둘러보기'}`;
+  const display=payload.action==='message' ? payload.text : payload.action==='wrapup' ? '이번 탐색 정리하기' : `${rec?.title||'선택한 주제'} · ${payload.action==='refine'?'구체화하기':'둘러보기'}`;
   localTurns.set(payload.request_id,{payload,display,failed:false});
   pendingTurn=payload; $('conversationError').hidden=true; setBusy(true);renderMessages();
   if(payload.action==='message'&&!retry){$('chatInput').value='';resizeInput();}
