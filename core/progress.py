@@ -99,11 +99,13 @@ def validated_focus_update(raw, events, previous=None):
     source = str(value.get('previous_focus') or '').strip()
     operation = value.get('operation')
     contrast = _fallback_revision(content)
-    if contrast and refs and target:
+    if contrast:
         operation = 'replace'
-        source = source or contrast['previous_focus']
-        if re.search(r'아니야|아닌가|아니라|말고|보다는', target):
-            target = contrast['current_focus']
+        # An explicit literal contrast outranks a model's paraphrased/incorrect
+        # role assignment, including one that accidentally retains the old focus.
+        source = contrast['previous_focus']
+        target = contrast['current_focus']
+        refs = [{'event_id':latest['id'],'quote':content}]
     if not (operation in OPERATIONS and refs and len(target)>=3 and any(target in r['quote'] for r in refs)):
         value = contrast
         if not value:
@@ -171,13 +173,17 @@ def enrich_progress(state, events, previous=None):
         focus=latest['payload'].get('title','') or focus;source='choice'
     elif update:
         focus=update['current_focus'];source='utterance'
+    elif latest and latest['type']=='user_input' and state.get('support_request')=='directions':
+        focus=latest['payload'].get('text','') or focus;source='utterance'
+    substantive_inputs=[e for e in scoped if e['type']=='user_input' and len(e['payload'].get('text',''))>=8
+                        and not re.match(r'^(?:고마워|감사|알겠어|응|네|좋아|오케이)(?:[.!? ]|$)',e['payload'].get('text',''))]
     if update and update['operation']=='replace':
         status='revising'
         description=f"‘{update['previous_focus']}’보다 ‘{update['current_focus']}’에 관심을 두려는 정정이 드러났어요."
     elif refinements or (update and update['operation']=='refine'):
         status='narrowing'
         description=f"최근 ‘{focus}’ 안의 문제·범위를 좁혀 검토하고 있어요."
-    elif steps or (update and update['operation'] in {'add','compare'}):
+    elif steps or len({e['payload']['text'] for e in substantive_inputs})>=2 or (update and update['operation'] in {'add','compare'}):
         status='reviewing'
         description=f"최근 ‘{focus}’와 관련된 관점을 검토하고 있어요."
     else:

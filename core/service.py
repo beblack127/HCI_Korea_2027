@@ -338,7 +338,8 @@ class Workspace:
                 "latest_action": action, "latest_input": display, "selected_direction": candidate,
                 "available_directions": context["available_directions"],
                 "messages": context["messages"], "supplied_papers": papers, "retrieval_error": retrieval_error}
-            checked_mode = plan["mode"] in {"browse", "directions", "formulate"}
+            validation_mode = "directions" if plan.get("correction_requested") else plan["mode"]
+            checked_mode = validation_mode in {"browse", "directions", "formulate"}
             checks = []
             for attempt in range(2 if checked_mode else 1):
                 # Provider failures propagate; only completed invalid content is repaired.
@@ -350,7 +351,7 @@ class Workspace:
                         raise
                     issues = ["invalid_response_content"]
                 else:
-                    issues = completed_response_issues(response, context["available_directions"], plan["mode"], candidate, display)
+                    issues = completed_response_issues(response, context["available_directions"], validation_mode, candidate, display)
                 checks.append(issues)
                 quality = {"attempts": attempt + 1, "issues_by_attempt": checks,
                            "status": "passed" if not issues else "repairing" if attempt == 0 else "failed"}

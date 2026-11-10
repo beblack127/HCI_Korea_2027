@@ -41,6 +41,14 @@ class ProgressTests(unittest.TestCase):
         self.assertNotIn('오래된',state['chat_summary'])
         self.assertEqual(state['difficulty_status'],'unknown')
 
+    def test_substantive_followup_is_visible_even_if_model_roles_cannot_be_grounded(self):
+        events=[event(1,text='언어모델의 의도 해석에 관심이 있어'),event(2,text='특히 상담에서 모호한 표현을 어떻게 해석하는지 살펴보고 싶어')]
+        state,_=estimate(dict(empty_state(),direction_stage='unknown'),events)
+        self.assertEqual(state['exploration_progress']['status'],'reviewing')
+        self.assertIn('상담에서 모호한 표현',state['exploration_progress']['focus'])
+        self.assertEqual(state['research_problem'],'')
+        self.assertNotIn('판단 유보',state['chat_summary'])
+
     def test_paper_save_and_single_click_are_not_comprehension_or_problem(self):
         events=[event(1,text='의도 해석'),event(2,'topic_select',title='질문 비용'),event(3,'paper_save',paper_id='W1')]
         state,_=estimate(empty_state(),events)
@@ -121,6 +129,13 @@ class ProgressTests(unittest.TestCase):
             'current_focus':'모호한 표현에 대한 모델의 의도 해석',
             'evidence_quotes':[{'event_id':2,'quote':events[1]['payload']['text']}]}),events,previous)
         self.assertEqual(state['focus_update']['operation'],'replace')
+        self.assertFalse(any('이해도' in a['text'] for a in state['clarified_aspects']))
+
+    def test_literal_correction_outranks_model_paraphrase_or_rejected_target(self):
+        events,previous=self.correction()
+        state,_=estimate(dict(empty_state(),focus_update={'operation':'replace','previous_focus':'새로 지어낸 과거 관점',
+            'current_focus':'사용자의 이해도','evidence_quotes':[{'event_id':2,'quote':events[1]['payload']['text']}]}),events,previous)
+        self.assertIn('모호한 표현',state['focus_update']['current_focus'])
         self.assertFalse(any('이해도' in a['text'] for a in state['clarified_aspects']))
 
     def test_retired_focus_does_not_return_after_a_later_choice_or_legacy_session(self):
