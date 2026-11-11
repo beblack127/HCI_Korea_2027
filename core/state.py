@@ -1,7 +1,7 @@
 """Evidence-bound projections, not a measurement of hidden cognition."""
 import copy
 import re
-from .behavior import behavior_signals, support_bundles, support_issues, request_type
+from .behavior import behavior_signals, support_bundles, support_issues, request_type, topic_steps
 from .difficulty import LABELS as DIFFICULTY_LABELS, negative_experience, difficulty_kind, guess_kind, technical_connection, pending_difficulties
 from .progress import validated_focus_update, correction_request, grounded_span
 
