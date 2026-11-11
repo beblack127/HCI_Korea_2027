@@ -362,3 +362,72 @@ code{font-size:11px;background:var(--soft);border:1px solid var(--line);border-r
 .agent-heading .agent-title{flex:1;overflow:hidden}
 .agent-heading .agent-title .heading-sub{overflow:hidden;text-overflow:ellipsis}
 .workspace.papers-collapsed #togglePapers svg{transform:rotate(180deg)}
+
+/* UI copy and hierarchy refresh; shared by both study conditions. */
+:root{--muted:#5f6b62;--subtle:#748077}
+.pane-heading h1{font-size:14px}
+.heading-sub{font-size:12px}
+.connection{font-size:11px}
+.state-scroll{padding:18px}
+.state-current{border-top:1px solid var(--line-strong);border-radius:8px;box-shadow:0 1px 3px #2532270b;padding:18px}
+.state-current h2{font-size:18px;line-height:1.6}
+.state-current .muted{font-size:13px;line-height:1.85}
+.section-eyebrow{font-size:11px}
+.stage-label{font-size:11px}
+.state-section{margin-top:20px;padding-top:18px}
+.state-section h3{font-size:12px;margin-bottom:10px}
+.state-help{margin-top:12px;color:var(--muted);font-size:11px;line-height:1.8}
+.state-help summary{cursor:pointer;list-style-position:inside}
+.state-help p{margin-top:9px;font-size:12px;line-height:1.8}
+.state-details>summary{font-size:12px;color:#46534a;line-height:1.7}
+#stateDetails>.state-section,.history-section>.state-section{margin-top:15px;padding-top:12px}
+#stateDetails>.state-section:first-of-type{border-top:0;padding-top:4px}
+.state-aspect p,.observed-direction p,.state-questions{font-size:12px;color:var(--muted);line-height:1.85}
+.section-note,.small-meta{color:#738077;font-size:11px}
+.next-step{font-size:13px;line-height:1.85;color:var(--ink)}
+.selected-connection{font-size:12px;line-height:1.85}
+.selected-connection summary{cursor:pointer;font-size:11px;color:var(--muted)}
+.selected-connection b{display:block;margin-top:8px}
+.message-meta{font-size:11px;color:var(--muted)}
+.message-meta>b{font-size:12px;color:#46534a}
+.agent-mark{background:#e9eee7;color:var(--accent);border:1px solid #d9e1d5;box-shadow:none;border-radius:7px}
+.agent-mark svg{width:16px;height:16px;stroke-width:1.5}
+.rec-heading{font-size:12px;color:#46534a}
+.rec-title{color:#334337}
+.rec-description{color:#627067}
+.rec-search-label{color:#738077}
+.rec-query{color:#4e6155}
+.rec-search-button{display:inline-flex;align-items:center;gap:5px;font-size:11px;color:#45634f}
+.rec-search-button svg{width:14px;height:14px}
+.selection-hint{font-size:11px;line-height:1.7;min-width:0;overflow-wrap:anywhere;flex:1}
+.paper-meta{font-size:10px;color:var(--muted)}
+.paper-title{color:#2f3c33;font-size:14px}
+.paper-authors{color:#6e7a71;font-size:11px}
+.paper-abstract{color:#5d6b62;font-size:12px}
+.paper-save,.original-link,.abstract-toggle{font-size:11px}
+.paper-save{color:#536a58;border-color:var(--line-strong)}
+.original-link{color:#5d7062}
+.paper-empty h2{font-size:13px;color:#56675b}
+.paper-empty p{font-size:12px;color:var(--muted)}
+.paper-footer{font-size:10px;color:var(--muted)}
+.welcome h2{font-size:29px;line-height:1.5}
+.welcome p{color:var(--muted)}
+.researcher-settings{margin:22px 0 0;padding-top:15px;border-top:1px solid var(--line);font-size:12px;color:var(--muted);line-height:1.8}
+.researcher-settings summary{cursor:pointer;color:#4b5b50}
+.researcher-settings p{margin-top:12px}
+.researcher-settings .setup-steps{margin:10px 0}
+.inline-error{color:#5b4a42;background:#faf5f2;border:1px solid #e4d5cc;padding:12px 14px;border-radius:9px;font-size:12px}
+.error-message{display:flex;flex-wrap:wrap;align-items:center;gap:7px 12px}
+.error-message p{flex-basis:100%;color:#6f4338;font-weight:550;line-height:1.75}
+.error-message>span{color:#756a64;font-size:11px}
+.error-message .button{margin-left:auto;background:#fff;text-decoration:none}
+.error-details{margin-top:10px;border-top:1px solid #e8dbd3;padding-top:8px;color:#756a64;font-size:11px;line-height:1.8}
+.error-details summary{cursor:pointer}
+.error-details p{margin-top:8px;overflow-wrap:anywhere}
+@media(max-width:700px){
+  .welcome h2{font-size:25px}
+  .rec-search-button{font-size:10px}
+  .rec-description{font-size:12px}
+  .state-scroll{padding:16px}
+}
+.state-pane[data-difficulty=expressed] .state-current,.state-pane[data-difficulty=possible] .state-current,.state-pane[data-difficulty=unconfirmed] .state-current{border-top-width:3px}

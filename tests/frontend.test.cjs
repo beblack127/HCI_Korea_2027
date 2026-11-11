@@ -6,7 +6,7 @@ const vm = require('node:vm');
 
 const root = path.resolve(__dirname, '..');
 const html = fs.readFileSync(path.join(root, 'templates/index.html'), 'utf8');
-const script = fs.readFileSync(path.join(root, 'static/app.js'), 'utf8');
+const script = fs.readFileSync(path.join(root, 'static/ui-copy.js'), 'utf8')+'\n'+fs.readFileSync(path.join(root, 'static/app.js'), 'utf8');
 const seed = () => ({session:{id:'qa-session',title:'검증 세션'},events:[],messages:[],saved_papers:[],estimate:null,last_search:null});
 const settle = () => new Promise(resolve => setImmediate(resolve));
 async function harness() {
@@ -42,7 +42,7 @@ async function harness() {
           if(options.snapshot)serverSnapshot=options.snapshot;
           else if(!serverSnapshot.messages.some(m=>m.request_id===body.request_id))serverSnapshot.messages.push({
             id:++nextId,request_id:body.request_id,role:'user',created_at:new Date().toISOString(),content:{text:body.text||'선택한 주제'}});
-          resolve({ok:!options.error,json:async()=>({snapshot:serverSnapshot,error:options.error})});
+          resolve({ok:!options.error,json:async()=>({snapshot:serverSnapshot,error:options.error,error_code:options.error_code})});
         };
       });
       if(url==='/api/papers/search')return response({snapshot:seed(),result:{papers:[],total:0,page:1,per_page:10,query:body.query}});
@@ -286,7 +286,7 @@ test('progress updates state before response completion without duplicating the 
       evidence_ids:[99],evidence_quotes:[{event_id:99,quote:'개념이 이해가 안 돼'}]}]},through_event_id:99,created_at:new Date().toISOString()},
     evidence_events:[{id:99,type:'user_input',payload:{text:'개념이 이해가 안 돼'},created_at:new Date().toISOString()}]});
   const poll=[...h.timeouts.values()][0];await poll();
-  assert.match(h.elements.get('stateUpdated').textContent,/상태 추정 완료, 답변 생성 중/);
+  assert.match(h.elements.get('stateUpdated').textContent,/답변 작성 중/);
   assert.equal(h.elements.get('statePane').dataset.difficulty,'expressed');
   assert.match(h.elements.get('difficultyList').innerHTML,/개념이 이해가 안 돼/);
   assert.equal((h.elements.get('messages').innerHTML.match(/개념이 이해가 안 돼/g)||[]).length,1);
@@ -430,7 +430,7 @@ test('observed narrowing remains visible when an explicit research problem is un
     exploration_progress:{status:'narrowing',label:'범위 좁혀 검토 중',focus:'질문을 되물을 확신도 임계값',problem_status:'unconfirmed'},
     difficulties:[],difficulty_status:'unknown'},through_event_id:1,created_at:new Date().toISOString()};
   h.qa.renderSnapshot(snap);
-  assert.equal(h.elements.get('stageLabel').textContent,'범위 좁혀 검토 중');
+  assert.equal(h.elements.get('stageLabel').textContent,'범위를 좁히는 중');
   assert.equal(h.elements.get('currentDirection').textContent,'질문을 되물을 확신도 임계값');
   assert.equal(h.elements.get('problemSection').hidden,true);
   assert.equal(h.elements.get('difficultyBadge').hidden,true);
@@ -449,4 +449,32 @@ test('focus correction has its own visible change without requiring a difficulty
   assert.match(h.elements.get('recentChange').textContent,/정정/);
   assert.doesNotMatch(h.elements.get('clarifiedAspects').innerHTML,/이해도 측정/);
   assert.equal(h.elements.get('difficultyBadge').hidden,true);
+});
+
+test('display-only copy keeps the saved estimate and each historical answer intact',async()=>{
+  const h=await harness(),snap=seed();
+  const summary='최근 ‘되묻기 시점’ 안의 문제·범위를 좁혀 검토하고 있어요. 연구 문제의 명시 여부와 별개로 관찰한 검토 흐름이에요.';
+  snap.estimate={state:{direction_stage:'unknown',summary,recent_change:'‘이해도’보다 ‘의도 해석’에 관심을 두려는 정정이 드러났어요.',difficulty_status:'unknown',difficulties:[]},through_event_id:1,created_at:new Date().toISOString()};
+  snap.messages=[{id:1,role:'assistant',created_at:new Date().toISOString(),content:{state_summary:'최근 ‘되묻기 시점’ 안의 문제·범위를 좁혀 검토하고 있어요.',response_format:'11.10-v3',recommendations:[]}}];
+  const before=JSON.stringify(snap);h.qa.renderSnapshot(snap);
+  assert.equal(JSON.stringify(snap),before);
+  assert.equal(h.elements.get('stateSummary').textContent,'‘되묻기 시점’의 검토 범위를 좁히고 있어요.');
+  assert.match(h.elements.get('recentChange').textContent,/‘이해도’에서 ‘의도 해석’으로 바꿨어요/);
+  assert.match(h.elements.get('messages').innerHTML,/검토 범위를 좁히고 있어요/);
+  assert.doesNotMatch(h.elements.get('messages').innerHTML,/탐색 조력자|response-duration/);
+});
+
+test('provider failures show a retry action with technical detail behind a disclosure',async()=>{
+  const h=await harness();const pending=h.qa.sendTurn({action:'message',text:'내 질문은 유지돼야 해'});await settle();
+  const id=h.requests.find(r=>r.url==='/api/turn').body.request_id;
+  h.finishTurn({error:'Gemini 응답 실패 HTTP 503 <script>detail</script>',error_code:'upstream_unavailable'});await pending;
+  const html=h.elements.get('conversationError').innerHTML;
+  assert.match(html,/답변을 불러오지 못했어요/);assert.match(html,/입력한 내용은 유지돼요/);
+  assert.match(html,/<details class="error-details"><summary>오류 정보/);
+  assert.match(html,/HTTP 503 &lt;script&gt;detail&lt;\/script&gt;/);
+  assert.doesNotMatch(html.split('<details')[0],/Gemini|HTTP 503/);
+  assert.match(h.elements.get('messages').innerHTML,/내 질문은 유지돼야 해/);
+  const retry=h.qa.sendTurn(null,true);await settle();
+  assert.equal(h.requests.filter(r=>r.url==='/api/turn').at(-1).body.request_id,id);
+  h.finishTurn();await retry;
 });
