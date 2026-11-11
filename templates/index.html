@@ -6,9 +6,9 @@
   <meta name="description" content="현재 탐색을 돌아보고, 연구할 다음 방향을 발견하는 학술 탐색 워크스페이스">
   <title>연구 탐색</title>
   <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/static/style.css?v=11.12-ui1">
-  <script src="/static/ui-copy.js?v=11.12-ui1" defer></script>
-  <script src="/static/app.js?v=11.12-ui1" defer></script>
+  <link rel="stylesheet" href="/static/style.css?v=11.12-ui2">
+  <script src="/static/ui-copy.js?v=11.12-ui2" defer></script>
+  <script src="/static/app.js?v=11.12-ui2" defer></script>
 </head>
 <body>
   <header class="app-header">
@@ -48,7 +48,7 @@
     <aside class="state-pane" id="statePane" aria-label="탐색 상태">
       <div class="pane-heading"><div class="heading-left"><h1>탐색 상태</h1></div><button class="icon-button" id="collapseState" aria-label="탐색 상태 패널 접기" aria-controls="statePane" title="탐색 상태 패널 접기"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m8 5 5 5-5 5"/></svg></button></div>
       <div class="state-scroll">
-        <section class="state-current"><div class="section-eyebrow">현재 검토 방향</div><div class="state-status-row"><div id="stageLabel" class="stage-label">탐색 전</div><span id="difficultyBadge" class="difficulty-badge" hidden></span></div><h2 id="currentDirection">관심에서 출발해 보세요</h2><p id="stateSummary" class="muted">대화와 선택을 바탕으로 현재 탐색을 정리합니다.</p><p class="updated-at" id="stateUpdated"></p><details class="state-help"><summary>이 내용은 어떻게 정리되나요?</summary><p>대화와 선택을 바탕으로 정리한 내용으로, 실제 생각과 다를 수 있어요. 주제를 살펴본 기록과 연구 문제의 확정은 구분해요. 해석이 다르면 대화로 알려주세요.</p></details></section>
+        <section class="state-current"><div class="section-eyebrow">현재 검토 방향</div><div class="state-status-row"><div id="stageLabel" class="stage-label">탐색 전</div><span id="directionConfidence" class="confidence-label" title="추정된 심리 상태의 확률이 아니라, 표시한 해석을 뒷받침하는 기록의 강도입니다."></span><span id="difficultyBadge" class="difficulty-badge" hidden></span></div><h2 id="currentDirection">관심에서 출발해 보세요</h2><p id="stateSummary" class="muted">대화와 선택을 바탕으로 현재 탐색을 정리합니다.</p><p class="updated-at" id="stateUpdated"></p><details class="state-help"><summary>이 내용은 어떻게 정리되나요?</summary><p>대화와 선택을 바탕으로 정리한 내용으로, 실제 생각과 다를 수 있어요. 주제를 살펴본 기록과 연구 문제의 확정은 구분해요. 해석이 다르면 대화로 알려주세요.</p></details></section>
         <section class="state-section" id="changeSection" hidden><h3>최근 변경</h3><p class="muted" id="recentChange"></p></section>
         <section class="state-section" id="nextSection" hidden><h3>다음 탐색</h3><p class="next-step" id="nextStep"></p><p class="muted" id="nextReason"></p><div id="selectedConnection" hidden></div><details class="state-details" id="recommendationContext" hidden><summary>후보별 연결 근거</summary><div id="recommendationReasons"></div></details></section>
         <section class="state-section difficulty-summary" id="difficultySection" hidden><div class="section-top"><h3>필요한 도움</h3><span class="difficulty-status" id="difficultyStatus"></span></div><div id="difficultyList"></div><div id="supportIssueList"></div></section>

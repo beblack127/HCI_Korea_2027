@@ -3,6 +3,7 @@ const $ = id => document.getElementById(id);
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const stateLabels = {exploring:'방향 탐색',forming:'방향 형성',unknown:'판단 유보'};
 const difficultyLabels = {concept:'개념 이해',connection:'관심과의 연결',selection:'후보 선택',formulation:'주제 구체화',unspecified:'유형 판단 유보'};
+const confidenceLabels = {high:'근거 뚜렷',medium:'여러 단서',low:'근거 제한'};
 const supportLabels = {directions:'다음 탐색 방향',browse:'주제 둘러보기',concept:'개념 설명',connection:'관심과의 연결',compare:'후보 비교',formulate:'주제 구체화',literature:'문헌 검토',orient:'탐색 흐름 정리',wrapup:'탐색 정리'};
 const historyLabels = {user_input:'질의 입력',topic_browse:'둘러보기',topic_refine:'구체화하기',paper_search_submit:'논문 검색',abstract_expand:'초록 펼치기',abstract_collapse:'초록 접기',paper_open:'원문 링크 열기',paper_save:'관심 논문에 담기',paper_unsave:'관심 논문에서 빼기',session_wrapup:'탐색 정리 선택'};
 let snapshot = null, status = null, busy = false, searching = false, pendingTurn = null;
@@ -131,9 +132,12 @@ function renderSnapshot(value, updateMessages=true) {
 function renderState() {
   const estimate=snapshot.estimate, state=estimate?.state;
   const progress=state?.exploration_progress;
-  const observedProgress=progress&&['reviewing','narrowing','revising'].includes(progress.status);
+  const observedProgress=progress&&['reviewing','narrowing','broadening','revising','revisiting'].includes(progress.status);
   $('stageLabel').textContent=observedProgress?displayStage(progress.label):state ? stateLabels[state.direction_stage] || '판단 유보' : '탐색 전';
   $('stageLabel').classList.toggle('neutral',!observedProgress&&(!state||state.direction_stage==='unknown'));
+  const directionConfidence=(observedProgress?progress?.confidence:state?.direction_confidence)||'low';
+  $('directionConfidence').textContent=state?confidenceLabels[directionConfidence]||'근거 제한':'';
+  $('directionConfidence').dataset.level=directionConfidence;
   $('currentDirection').textContent=(observedProgress?progress.focus:'') || state?.current_direction || '관심에서 출발해 보세요';
   $('stateSummary').textContent=displaySummary(state?.summary) || '대화와 선택을 바탕으로 정리해요.';
   $('problemSection').hidden=!state?.research_problem;
@@ -179,7 +183,7 @@ function renderState() {
     const quote=d.evidence_quotes?.[0]?.quote||evidence?.payload.text||'';
     const waiting=d.lifecycle==='unconfirmed';
     const signals=d.recent_signals||d.signals||[];
-    return `<div class="difficulty-item"><b>${esc(difficultyLabels[d.type]||'탐색의 어려움')}${waiting?' · 후속 확인 전':d.status==='possible'?' · 지원 필요 가능성':''}</b><p>${esc(waiting?'이후에 변화가 있었는지 아직 판단하지 않았어요.':d.description)}</p>${d.target&&d.target!==quote?`<p class="difficulty-target">대상 · ${esc(d.target)}</p>`:''}${quote?`<blockquote class="difficulty-evidence">${esc(quote.slice(0,180))}${quote.length>180?'…':''}</blockquote>`:''}${d.inference_reason?`<p class="difficulty-reason">추정 근거 · ${esc(d.inference_reason)}</p>`:''}${signals.length?`<ul class="state-questions">${signals.map(s=>`<li>${esc(s.observation)}</li>`).join('')}</ul>`:''}</div>`;
+    return `<div class="difficulty-item"><b>${esc(difficultyLabels[d.type]||'탐색의 어려움')}${waiting?' · 후속 확인 전':d.status==='possible'?' · 지원 필요 가능성':''}</b><p>${esc(waiting?'이후에 변화가 있었는지 아직 판단하지 않았어요.':d.description)}</p>${d.confidence?`<p class="difficulty-confidence">근거 강도 · ${esc(confidenceLabels[d.confidence]||'근거 제한')}</p>`:''}${d.target&&d.target!==quote?`<p class="difficulty-target">대상 · ${esc(d.target)}</p>`:''}${quote?`<blockquote class="difficulty-evidence">${esc(quote.slice(0,180))}${quote.length>180?'…':''}</blockquote>`:''}${d.inference_reason?`<p class="difficulty-reason">추정 근거 · ${esc(d.inference_reason)}</p>`:''}${signals.length?`<ul class="state-questions">${signals.map(s=>`<li>${esc(s.observation)}</li>`).join('')}</ul>`:''}</div>`;
   }).join('') : `<p class="difficulty-empty">${unconfirmed?(pendingDifficulties.length?'이전에 표현한 어려움은 후속 확인 전이에요.':'이전에 추정한 도움이 필요한 부분은 후속 확인 전이에요.'):state?.difficulty_status==='clear'?'후속 탐색에서 어려움의 해소·진전 또는 새 방향 탐색이 추정됐어요.':'현재 기록만으로는 어려움의 유무를 판단하기 어려워요.'}</p>`;
   $('supportIssueList').innerHTML=supportIssues.map(s=>`<p class="section-note">${esc(s.observation)}</p>`).join('');
   const history=difficultyHistory, lifecycleLabels={active:'진행 중',unconfirmed:'후속 확인 전',resolved:'해소 추정',progressed:'후속 탐색 진전',redirected:'새 방향에서 탐색 재개',out_of_scope:'현재 방향 밖'};

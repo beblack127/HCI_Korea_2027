@@ -1,6 +1,6 @@
 'use strict';
 // Display-only copy. Stored estimates, quotations, prompts and policy stay intact.
-const UI_REVISION = '11.12-ui1';
+const UI_REVISION = '11.12-ui2';
 function toward(value) {
   const char=Array.from(String(value).trim()).at(-1)||'';
   const code=char.codePointAt(0);
@@ -22,7 +22,8 @@ function displaySummary(value) {
     .trim();
 }
 function displayStage(value) {
-  return ({'범위 좁혀 검토 중':'범위를 좁히는 중','관점 검토 중':'관점 검토 중','관점 조정 중':'관점 조정 중'})[value] || value;
+  return ({'범위 좁혀 검토 중':'범위를 좁히는 중','관점 검토 중':'관점 검토 중','관점 조정 중':'관점 조정 중',
+    '다른 갈래 살펴보는 중':'다른 갈래 살펴보는 중','같은 범위를 다시 검토 중':'같은 범위를 다시 살펴보는 중'})[value] || value;
 }
 function friendlyError(value, area='conversation') {
   const detail=String(value?.error || value?.message || '');

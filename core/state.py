@@ -1,9 +1,10 @@
 """Evidence-bound projections, not a measurement of hidden cognition."""
 import copy
+import hashlib
 import re
-from .behavior import behavior_signals, support_bundles, support_issues, request_type, topic_steps
+from .behavior import behavior_signals, support_bundles, support_issues, request_type, topic_steps, normalized
 from .difficulty import LABELS as DIFFICULTY_LABELS, negative_experience, difficulty_kind, guess_kind, technical_connection, pending_difficulties
-from .progress import validated_focus_update, correction_request, grounded_span
+from .progress import validated_focus_update, correction_request, grounded_span, alternative_request
 
 OBSERVATIONS = {"user_input", "topic_select", "topic_browse", "topic_refine", "paper_search_submit",
                 "abstract_expand", "abstract_collapse", "paper_open", "paper_save", "paper_unsave", "session_wrapup"}
@@ -14,7 +15,9 @@ ACTION_LABELS = {"topic_select": "후보 선택", "topic_browse": "둘러보기 
 
 
 def empty_state():
-    return {"direction_stage": "unknown", "current_direction": "", "research_problem": "",
+    return {"direction_stage": "unknown", "direction_confidence": "low", "trajectory_assessment": {
+                "status": "uncertain", "confidence": "low", "reason": "", "evidence_ids": []},
+            "current_direction": "", "research_problem": "",
             "problem_evidence_ids": [], "problem_evidence": [],
             "summary": "아직 탐색 상태를 판단할 정보가 충분하지 않습니다.", "recent_change": "",
             "difficulty_status": "unknown", "difficulties": [], "difficulty_history": [], "pending_difficulties": [], "support_issues": [], "evidence": [],
@@ -118,7 +121,7 @@ def _difficulty_expression(kind, value):
 def _request_kind(content):
     if re.search(r"(?:논문|문헌).{0,15}(?:추천|찾|보여)|관련\s*논문", content):
         return "literature"
-    if technical_connection(content) or re.search(r"(?:뭐야|무슨\s*뜻|정의|개념.{0,10}설명|쉽게.{0,10}설명|예시.{0,10}설명|이해가?\s*안)", content):
+    if technical_connection(content) or re.search(r"(?:뭐야|무슨\s*뜻|정의|(?:이|가)?란\??$|종류.{0,15}(?:뭐가|무엇|어떤|있어)|무슨\s*종류|의미.{0,8}(?:뭐|무엇)|개념.{0,10}설명|쉽게.{0,10}설명|예시.{0,10}설명|이해가?\s*안)", content):
         return "concept"
     if re.search(r"(?:관련|연결|왜\s*추천)", content):
         return "connection"
@@ -142,6 +145,20 @@ def _history(previous):
                 history.append(dict(d, id=f"difficulty-{min(ids)}-{d['type']}", topic=(previous or {}).get("current_direction", ""),
                                     lifecycle="unconfirmed", first_event_id=min(ids), last_event_id=max(ids), support_provided=False))
     return history
+
+
+def _same_difficulty_target(left, right):
+    """Match a difficulty episode only when its observed target is substantially the same."""
+    a, b = normalized(left), normalized(right)
+    if not a or not b:
+        return False
+    if a == b or (min(len(a), len(b)) >= 9 and (a in b or b in a)):
+        return True
+    ignored = {"사용자", "연구", "주제", "문제", "어떻게", "모르겠", "구체화"}
+    ta = {x for x in re.findall(r"[a-z][a-z0-9_-]*|[가-힣]{2,}", str(left).casefold()) if x not in ignored}
+    tb = {x for x in re.findall(r"[a-z][a-z0-9_-]*|[가-힣]{2,}", str(right).casefold()) if x not in ignored}
+    shared = ta & tb
+    return len(shared) >= 2 and len(shared) / max(1, min(len(ta), len(tb))) >= 0.7
 
 
 def summarize_state(state):
@@ -176,6 +193,8 @@ def validate_state(raw, events, previous=None, trace=None):
     state["detail_requested"] = bool(re.search(r"자세히|자세하게|상세히|상세하게|꼼꼼히|단계별로", content))
     state["direction_stage"] = raw.get("direction_stage") if raw.get("direction_stage") in STAGE_LABELS else "unknown"
     state["current_direction"] = text(raw.get("current_direction"), 180)
+    state["direction_confidence"] = raw.get("direction_confidence") if raw.get("direction_confidence") in {"high", "medium", "low"} else "low"
+    state["focus_update"] = validated_focus_update(raw, events, previous)
     state["recent_change"] = text(raw.get("recent_change"), 250)
     state["unresolved"] = [text(x, 180) for x in (raw.get("unresolved") or [])[:4] if isinstance(x, str)]
     problem = text(raw.get("research_problem"), 350)
@@ -197,8 +216,43 @@ def validate_state(raw, events, previous=None, trace=None):
     topic_ids = valid_ids(raw.get("topic_evidence_ids"), allowed)
     explicit_shift = bool(re.search(r"다른\s*주제|주제를?\s*바꾸|이제.{0,25}(?:대신|주제로|탐색할)|그건\s*그만", content))
     action_shift = latest and latest["type"] == "topic_browse" and latest["payload"].get("title") != (previous or {}).get("current_direction")
-    changed = raw.get("topic_relation") == "changed" and latest_id in topic_ids and (explicit_shift or action_shift)
+    is_branch_request = bool(latest and latest["type"] == "user_input" and alternative_request(content))
+    changed = (not is_branch_request and raw.get("topic_relation") == "changed"
+               and latest_id in topic_ids and (explicit_shift or action_shift))
     state["topic_relation"] = "changed" if changed else ("same" if raw.get("topic_relation") == "same" else "uncertain")
+    if is_branch_request:
+        state["topic_relation"] = "same"
+    if latest and latest["type"] == "user_input" and (previous or {}).get("current_direction") and not changed:
+        update = state.get("focus_update") or {}
+        operation = update.get("operation")
+        if is_branch_request:
+            state["current_direction"] = text(previous.get("current_direction"), 180)
+        elif operation not in {"add", "refine", "replace"} and _request_kind(content) != "directions":
+            state["current_direction"] = text(previous.get("current_direction"), 180)
+        elif operation not in {"add", "refine", "replace"} and raw.get("topic_relation") == "same":
+            state["current_direction"] = text(previous.get("current_direction"), 180)
+
+    trajectory = raw.get("trajectory_assessment") or {}
+    trajectory_status = trajectory.get("status") if trajectory.get("status") in {"reviewing", "narrowing", "broadening", "revisiting", "uncertain"} else "uncertain"
+    trajectory_ids = valid_ids(trajectory.get("evidence_ids"), allowed)
+    trajectory_user_ids = [event_id for event_id in trajectory_ids if allowed[event_id]["type"] in
+                           {"user_input", "topic_select", "topic_browse", "topic_refine"}]
+    trajectory_confidence = trajectory.get("confidence") if trajectory.get("confidence") in {"high", "medium", "low"} else "low"
+    trajectory_reason = text(trajectory.get("reason"), 220)
+    trajectory_supported = (trajectory_status != "uncertain" and latest_id in trajectory_user_ids
+                            and len(trajectory_reason) >= 12)
+    if trajectory_status in {"broadening", "revisiting"} and len(set(trajectory_user_ids)) < 2 and not is_branch_request:
+        trajectory_supported = False
+    if not trajectory_supported:
+        trajectory_status, trajectory_confidence, trajectory_reason, trajectory_user_ids = "uncertain", "low", "", []
+    elif trajectory_status in {"broadening", "revisiting"} and trajectory_confidence == "high" and len(set(trajectory_user_ids)) < 3:
+        trajectory_confidence = "medium"
+    state["trajectory_assessment"] = {"status": trajectory_status, "confidence": trajectory_confidence,
+                                      "reason": trajectory_reason, "evidence_ids": trajectory_user_ids}
+    if is_branch_request:
+        state["trajectory_assessment"] = {"status": "broadening", "confidence": "high",
+            "reason": "기존 관심을 유지한 채 다른 연구 방향 후보를 요청한 발화가 확인됨",
+            "evidence_ids": [latest_id]}
     state["clarified_aspects"] = []
     for aspect in (raw.get("clarified_aspects") or [])[:4]:
         if not isinstance(aspect, dict) or aspect.get("kind") not in {"interest", "problem", "perspective", "scope"}:
@@ -219,7 +273,7 @@ def validate_state(raw, events, previous=None, trace=None):
         same_direction_sequence = (state["topic_relation"] == "same"
                                    and latest_id in relation_evidence
                                    and len(distinct_refinements) >= 2)
-        grounded_focus = validated_focus_update(raw, events, previous)
+        grounded_focus = state.get("focus_update")
         grounded_aspects = {event_id for aspect in state["clarified_aspects"]
                             if aspect["kind"] in {"perspective", "scope"}
                             for event_id in aspect["evidence_ids"]
@@ -230,8 +284,33 @@ def validate_state(raw, events, previous=None, trace=None):
                               and grounded_focus["operation"] in {"add", "refine", "compare"}
                               and latest_id in grounded_focus["evidence_ids"])
         if not (same_direction_sequence or grounded_multi_turn or focused_trajectory):
-            state["direction_stage"] = "unknown"
+            state["direction_stage"] = "exploring" if state["current_direction"] else "unknown"
             warnings.append("forming_without_session_evidence")
+
+    previous_stage = (previous or {}).get("direction_stage")
+    if is_branch_request:
+        state["direction_stage"] = "exploring" if state["current_direction"] else "unknown"
+    elif changed:
+        state["direction_stage"] = "exploring" if state["current_direction"] else "unknown"
+    elif (previous_stage == "forming" and state["current_direction"]
+          and state["current_direction"] == (previous or {}).get("current_direction")
+          and state["trajectory_assessment"].get("status") != "broadening"):
+        state["direction_stage"] = "forming"
+    elif state["direction_stage"] == "unknown" and state["current_direction"]:
+        state["direction_stage"] = previous_stage if previous_stage in {"exploring", "forming"} else "exploring"
+
+    if state["direction_stage"] == "unknown":
+        state["direction_confidence"] = "low"
+    elif state["direction_stage"] == "forming":
+        state["direction_confidence"] = "high" if state["research_problem"] else "medium"
+    else:
+        direction_ids = valid_ids(topic_ids + [latest_id], allowed)
+        sources = []
+        for event_id in direction_ids:
+            payload = allowed[event_id]["payload"]
+            sources.extend(text(payload.get(key), 350) for key in ("text", "title", "query") if payload.get(key))
+        grounded_direction = any(grounded_span(state["current_direction"], source) for source in sources)
+        state["direction_confidence"] = "high" if grounded_direction else "medium" if len(set(direction_ids)) >= 2 else "low"
 
     request = raw.get("support_request")
     request_ids = valid_ids(raw.get("support_request_evidence_ids"), allowed)
@@ -323,10 +402,20 @@ def validate_state(raw, events, previous=None, trace=None):
         if changed and latest_id not in ids:
             continue
         related_id = text(d.get("related_difficulty_id"), 100)
-        existing = next((h for h in history if related_id and h.get("id") == related_id
-                         and h.get("lifecycle") in {"active", "unconfirmed"}), None)
+        related = next((h for h in history if related_id and h.get("id") == related_id
+                        and h.get("lifecycle") in {"active", "unconfirmed"}), None)
+        existing = related if (related and related.get("type") == kind
+                               and _same_difficulty_target(related.get("target"), target)) else None
+        if related and existing is None:
+            warnings.append("difficulty_episode_target_or_type_mismatch")
+        if existing is None:
+            existing = next((h for h in history if h.get("type") == kind
+                             and h.get("lifecycle") in {"active", "unconfirmed"}
+                             and _same_difficulty_target(h.get("target"), target)), None)
         if status == "possible" and existing is None:
-            episode_id = f"difficulty-{min(ids)}-{kind}"
+            episode_start = min(ids)
+            target_key = hashlib.sha256(normalized(target).encode()).hexdigest()[:8]
+            episode_id = f"difficulty-{episode_start}-{kind}-{target_key}"
             existing = next((h for h in history if h.get("id") == episode_id
                              and h.get("lifecycle") in {"active", "unconfirmed"}), None)
         if existing and existing.get("status") == "expressed" and status == "possible":
@@ -339,6 +428,7 @@ def validate_state(raw, events, previous=None, trace=None):
                        else f"발화와 세션 내 행동에서 {DIFFICULTY_LABELS[kind]} 지원이 필요할 가능성이 보여요.")
         item = {"type": kind, "status": status, "description": description,
                 "target": target, "inference_reason": text(d.get("reason"), 240),
+                "confidence": "high" if status == "expressed" else "medium",
                 "evidence_ids": ids, "evidence_quotes": direct,
                 "source": "utterance" if status == "expressed" else "behavior",
                 "signals": bundles[kind]["signals"] if status == "possible" and kind in bundles else []}
@@ -348,7 +438,8 @@ def validate_state(raw, events, previous=None, trace=None):
             existing.update(item, lifecycle="active", last_event_id=max(ids))
         else:
             episode_start = latest_id if status == "expressed" else min(ids)
-            existing = dict(item, id=f"difficulty-{episode_start}-{kind}", topic=state["current_direction"], lifecycle="active",
+            target_key = hashlib.sha256(normalized(target).encode()).hexdigest()[:8]
+            existing = dict(item, id=f"difficulty-{episode_start}-{kind}-{target_key}", topic=state["current_direction"], lifecycle="active",
                             first_event_id=episode_start, last_event_id=max(ids), support_provided=False)
             history.append(existing)
         state["difficulties"].append(dict(item, id=existing["id"]))

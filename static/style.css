@@ -78,6 +78,9 @@ button:hover{background:var(--soft)}
 .state-current .muted{font-size:13px;line-height:1.9}
 .state-status-row{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-bottom:11px}
 .state-status-row .stage-label{margin-bottom:0;flex-shrink:0}
+.confidence-label{font-size:10px;line-height:1.5;color:var(--subtle);padding:3px 0}
+.confidence-label[data-level="high"]{color:#58734d}
+.confidence-label[data-level="low"]{color:#8b8175}
 .difficulty-badge{font-size:10px;line-height:1.6;color:#8a625c;background:#f5ebea;border:1px solid #dfc6c1;border-radius:3px;padding:3px 7px}
 .muted{font-size:12px;color:var(--muted);line-height:1.85;word-break:keep-all;overflow-wrap:anywhere}
 .updated-at{font-size:9px;color:var(--subtle);line-height:1.7;margin-top:12px;padding-top:10px;border-top:1px solid #ecefe7}
@@ -99,6 +102,7 @@ button:hover{background:var(--soft)}
 .difficulty-item{font-size:12px;line-height:1.85;margin-bottom:15px;color:var(--difficulty-ink);overflow-wrap:anywhere}
 .difficulty-item:last-child{margin-bottom:0}
 .difficulty-item b{display:block;color:#7b5b56;font-size:12px;font-weight:650;margin-bottom:5px}
+.difficulty-confidence{font-size:10px;color:var(--subtle);margin:0 0 4px}
 .difficulty-evidence{font-size:11px;line-height:1.75;color:#967d76;border-left:2px solid #d8bfba;margin:10px 0 0;padding:0 0 0 9px;white-space:pre-wrap;overflow-wrap:anywhere}
 .difficulty-empty{font-size:11px;line-height:1.8;color:var(--subtle)}
 .state-pane .state-section:not(.difficulty-summary) h3{font-size:12px}

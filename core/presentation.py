@@ -25,9 +25,13 @@ def chat_summary(state):
     progress = state.get("exploration_progress") or {}
     expressed = next((d for d in active if d.get("status") == "expressed"), None)
     labels = LABELS
-    if progress.get("status") in {"reviewing", "narrowing", "revising"}:
+    if progress.get("status") in {"reviewing", "narrowing", "broadening", "revising", "revisiting"}:
         focus = compact(progress.get("focus"), limit=65)
-        if progress["status"] == "revising":
+        if progress["status"] == "broadening":
+            summary = f"‘{focus}’의 관심을 유지하며 다른 연구 방향도 살펴보려 하고 있어요."
+        elif progress["status"] == "revisiting":
+            summary = f"‘{focus}’와 관련된 검토 지점으로 되돌아오는 흐름이 보여요."
+        elif progress["status"] == "revising":
             summary = f"최근 정정을 반영해 ‘{focus}’ 쪽으로 검토 관점을 조정하고 있어요."
         elif progress["status"] == "narrowing":
             summary = f"최근 ‘{focus}’ 안의 문제·범위를 좁혀 검토하고 있어요."
@@ -71,7 +75,7 @@ def enrich_state(state, events, previous=None):
         boundary = latest["id"]
     state["direction_context_start_event_id"] = boundary
     scoped = [e for e in events if e["id"] >= boundary]
-    state["display_version"] = "11.12-v1"
+    state["display_version"] = "11.12-v2"
     choices = [e for e in scoped if e["type"] in {"topic_select", "topic_browse", "topic_refine"}]
     seen, directions = set(), []
     choice_labels = {"topic_select": "후보 선택", "topic_browse": "둘러보기", "topic_refine": "구체화하기"}
@@ -105,7 +109,10 @@ def enrich_state(state, events, previous=None):
                                            "evidence_ids": state.get("problem_evidence_ids", [])})
     state["change_evidence_ids"] = [latest["id"]] if latest else []
     update = state.get("focus_update")
-    if update:
+    if update and update["operation"] == "branch":
+        state["change_evidence_ids"] = update["evidence_ids"]
+        state["recent_change"] = f"현재 관심을 유지하며 다른 연구 방향 후보도 요청했어요. 새 후보를 선택하기 전까지 기존 방향은 그대로 둡니다."
+    elif update:
         target = compact(update["current_focus"], limit=90)
         source = compact(update["previous_focus"], limit=70)
         state["change_evidence_ids"] = update["evidence_ids"]
@@ -150,6 +157,6 @@ def enrich_state(state, events, previous=None):
         state["open_questions"] = ["현재 관심에서 어떤 현상이나 문제를 살펴볼지"]
     state["chat_summary"] = chat_summary(state)
     progress = state.get("exploration_progress") or {}
-    if progress.get("status") in {"reviewing", "narrowing", "revising"}:
+    if progress.get("status") in {"reviewing", "narrowing", "broadening", "revising", "revisiting"}:
         state["summary"] = progress["description"] + (" 연구 문제의 명시 여부와 별개로 관찰한 검토 흐름이에요." if not state.get("research_problem") else " 연구 문제의 최종 확정을 의미하지는 않아요.")
     return state

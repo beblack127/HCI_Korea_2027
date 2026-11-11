@@ -7,8 +7,19 @@ import copy
 import re
 from .behavior import normalized, topic_steps
 
-PROGRESS_LABELS = {"initial": "관심 탐색", "reviewing": "관점 검토 중", "narrowing": "범위 좁혀 검토 중", "revising": "관점 조정 중"}
-OPERATIONS = {"add", "refine", "replace", "compare"}
+PROGRESS_LABELS = {"initial": "관심 탐색", "reviewing": "관점 검토 중", "narrowing": "범위 좁혀 검토 중",
+                   "broadening": "다른 갈래 살펴보는 중", "revising": "관점 조정 중",
+                   "revisiting": "같은 범위를 다시 검토 중"}
+OPERATIONS = {"add", "refine", "replace", "compare", "branch"}
+
+
+def alternative_request(value):
+    """A request for more candidates adds a branch; it does not replace the focus."""
+    value = str(value or "")
+    return bool(re.search(
+        r"(?:다른|새로운)\s*(?:연구\s*)?(?:주제|방향|후보|관점).{0,18}(?:없|있|추천|제안|보여|찾|가능)|"
+        r"(?:이\s*(?:세|셋|3)\s*개?\s*말고|그\s*외에).{0,18}(?:주제|방향|후보)|"
+        r"(?:주제|방향|후보).{0,12}(?:더\s*없|다른\s*것|다른\s*거)", value))
 
 
 def grounded_span(value, source, context=False):
@@ -50,6 +61,8 @@ def grounded_span(value, source, context=False):
 
 def correction_request(value):
     # A request to repair recommendations, independent of a difficulty judgement.
+    if alternative_request(value):
+        return False
     return bool(re.search(r"(?:말고|아니라|아닌|대신|보다는)|(?:추천|후보|주제|설명).{0,40}(?:아니야|아닌가|달라|다르|잘못|빗나|맞지|맞는.*아니)|(?:내가|제가).{0,15}(?:궁금한|원하는|말한).{0,10}(?:건|것은)", value))
 
 
@@ -68,6 +81,8 @@ def matches_focus(value, focus):
 
 
 def _fallback_revision(content):
+    if alternative_request(content):
+        return None
     if not correction_request(content) or not re.search(r"주제|후보|추천|내가|제가|관심|궁금한|원하는", content):
         return None
     # Only extract literal spans around an explicit contrast. No new topic text.
@@ -90,6 +105,10 @@ def validated_focus_update(raw, events, previous=None):
     if not latest or latest['type'] != 'user_input':
         return None
     content = latest['payload'].get('text','')
+    if alternative_request(content):
+        return {'operation':'branch','previous_focus':'','current_focus':content[:180],
+                'evidence_quotes':[{'event_id':latest['id'],'quote':content}],
+                'evidence_ids':[latest['id']],'event_id':latest['id']}
     value = raw.get('focus_update') or {}
     refs = [r for r in value.get('evidence_quotes',[]) if isinstance(r,dict)
             and r.get('event_id')==latest['id'] and len(r.get('quote',''))>=3 and r['quote'] in content]
@@ -138,9 +157,9 @@ def enrich_progress(state, events, previous=None):
         for index,event in enumerate(scoped):
             if event['type']=='user_input':
                 reconstructed=validated_focus_update({},scoped[:index+1])
-                if reconstructed:
+                if reconstructed and reconstructed['operation'] != 'branch':
                     history.append(reconstructed)
-    if update and not any(x['event_id']==update['event_id'] for x in history):
+    if update and update['operation'] != 'branch' and not any(x['event_id']==update['event_id'] for x in history):
         history.append(copy.deepcopy(update))
     state['focus_history']=history[-12:]
     excluded=[]
@@ -169,7 +188,9 @@ def enrich_progress(state, events, previous=None):
     refinements=[s for s in steps if s['action']=='topic_refine']
     focus=state.get('current_direction','')
     source='estimate'
-    if latest and latest['type'] in {'topic_browse','topic_refine'}:
+    if update and update['operation'] == 'branch' and previous.get('current_direction'):
+        focus=previous['current_direction'];source='previous_direction'
+    elif latest and latest['type'] in {'topic_browse','topic_refine'}:
         focus=latest['payload'].get('title','') or focus;source='choice'
     elif update:
         focus=update['current_focus'];source='utterance'
@@ -177,20 +198,47 @@ def enrich_progress(state, events, previous=None):
         focus=latest['payload'].get('text','') or focus;source='utterance'
     substantive_inputs=[e for e in scoped if e['type']=='user_input' and len(e['payload'].get('text',''))>=8
                         and not re.match(r'^(?:고마워|감사|알겠어|응|네|좋아|오케이)(?:[.!? ]|$)',e['payload'].get('text',''))]
-    if update and update['operation']=='replace':
+    trajectory=state.get('trajectory_assessment') or {}
+    if update and update['operation']=='branch':
+        status='broadening'
+        description=f"현재 관심 ‘{focus}’를 유지하며 다른 연구 방향 후보도 살펴보려는 요청이 있었어요." if focus else "다른 연구 방향 후보를 살펴보려는 요청이 있었어요."
+    elif update and update['operation']=='replace':
         status='revising'
         description=f"‘{update['previous_focus']}’보다 ‘{update['current_focus']}’에 관심을 두려는 정정이 드러났어요."
-    elif refinements or (update and update['operation']=='refine'):
+    elif state.get('topic_relation')=='changed':
+        status='revising'
+        description=f"‘{focus}’와 구분되는 새 방향을 살펴보기 시작했어요."
+    elif refinements or (update and update['operation']=='refine') or trajectory.get('status')=='narrowing':
         status='narrowing'
         description=f"최근 ‘{focus}’ 안의 문제·범위를 좁혀 검토하고 있어요."
+    elif trajectory.get('status')=='revisiting':
+        status='revisiting'
+        description=f"‘{focus}’와 관련된 검토 지점으로 되돌아오는 흐름이 보여요."
+    elif trajectory.get('status')=='broadening':
+        status='broadening'
+        description=f"‘{focus}’와 연결된 다른 관점도 살펴보고 있어요."
     elif steps or len({e['payload']['text'] for e in substantive_inputs})>=2 or (update and update['operation'] in {'add','compare'}):
         status='reviewing'
         description=f"최근 ‘{focus}’와 관련된 관점을 검토하고 있어요."
     else:
         status='initial';description='관심에서 살펴볼 연구 방향을 탐색하고 있어요.'
-    evidence=list(dict.fromkeys(([latest['id']] if latest else [])+([refinements[-1]['id']] if refinements else [])))
+    evidence=list(dict.fromkeys(([latest['id']] if latest else [])+([refinements[-1]['id']] if refinements else [])+
+                                (trajectory.get('evidence_ids') or [])))
+    if status == 'broadening' and update and update['operation'] == 'branch':
+        confidence='high'
+    elif status == 'revising' and (update or state.get('topic_relation') == 'changed'):
+        confidence='high'
+    elif status == 'narrowing' and (refinements or (update and update['operation'] == 'refine')):
+        confidence='high'
+    elif trajectory.get('status') == status:
+        confidence=trajectory.get('confidence', 'low')
+    elif status == 'reviewing' and (steps or len({e['payload']['text'] for e in substantive_inputs}) >= 2):
+        confidence='medium'
+    else:
+        confidence=state.get('direction_confidence', 'low')
     state['exploration_progress']={'status':status,'label':PROGRESS_LABELS[status],
         'focus':focus[:180],'source':source,'description':description,'evidence_ids':evidence,
+        'confidence':confidence,
         'problem_status':'expressed' if state.get('research_problem') else 'unconfirmed',
         'note':'관찰한 검토 흐름이며, 연구 문제의 확정이나 이해를 의미하지 않아요.'}
     return state
