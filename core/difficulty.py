@@ -25,8 +25,9 @@ def personal_connection(value):
 
 
 def technical_connection(value):
-    return (not personal_connection(value) and bool(re.search(r"임베딩|벡터|모델|알고리즘|데이터|가중치|추론|원리|메커니즘|기술", value))
-            and bool(re.search(r"연결|결합|주입|반영", value)))
+    technical = r"임베딩|벡터|모델|알고리즘|데이터|가중치|추론|원리|메커니즘|기술|클러스터링|군집|일반화|전이학습|메타.?학습|시퀀스"
+    relation = r"연결|결합|주입|반영|작동|기반|통해|어떻게"
+    return not personal_connection(value) and bool(re.search(technical, value)) and bool(re.search(relation, value))
 
 
 def difficulty_kind(proposed, value):

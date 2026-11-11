@@ -41,6 +41,16 @@ def observation(event):
     return ACTION_LABELS.get(kind, kind) + ": “" + text(value, 250) + "”"
 
 
+def grounded_difficulty_target(value, event_ids, allowed):
+    for event_id in event_ids:
+        payload = allowed[event_id]["payload"]
+        for source in (payload.get("text"), payload.get("title"), payload.get("query")):
+            target = grounded_span(value, text(source, 500))
+            if target:
+                return target
+    return ""
+
+
 def quoted_evidence(refs, allowed):
     result = []
     for ref in (refs or [])[:8]:
@@ -158,6 +168,7 @@ def validate_state(raw, events, previous=None, trace=None):
     """Validate quotations and conservative criteria; no claim of psychological truth."""
     state, warnings = empty_state(), []
     allowed = {e["id"]: e for e in events if e["type"] in OBSERVATIONS}
+    latest_observation_id = max(allowed, default=0)
     latest = next((e for e in reversed(events) if e["type"] in {"user_input", "topic_browse", "topic_refine"}), None)
     latest_id = latest["id"] if latest else 0
     content = latest["payload"].get("text", "") if latest and latest["type"] == "user_input" else ""
@@ -183,9 +194,11 @@ def validate_state(raw, events, previous=None, trace=None):
         state.update(research_problem=_problem_excerpt(quote),
                      problem_evidence=refs, problem_evidence_ids=[r["event_id"] for r in refs])
         state["problem_basis"] = basis
-    if state["direction_stage"] == "forming" and not state["research_problem"]:
-        state["direction_stage"] = "unknown"
-        warnings.append("forming_without_grounded_problem")
+    topic_ids = valid_ids(raw.get("topic_evidence_ids"), allowed)
+    explicit_shift = bool(re.search(r"다른\s*주제|주제를?\s*바꾸|이제.{0,25}(?:대신|주제로|탐색할)|그건\s*그만", content))
+    action_shift = latest and latest["type"] == "topic_browse" and latest["payload"].get("title") != (previous or {}).get("current_direction")
+    changed = raw.get("topic_relation") == "changed" and latest_id in topic_ids and (explicit_shift or action_shift)
+    state["topic_relation"] = "changed" if changed else ("same" if raw.get("topic_relation") == "same" else "uncertain")
     state["clarified_aspects"] = []
     for aspect in (raw.get("clarified_aspects") or [])[:4]:
         if not isinstance(aspect, dict) or aspect.get("kind") not in {"interest", "problem", "perspective", "scope"}:
@@ -194,6 +207,31 @@ def validate_state(raw, events, previous=None, trace=None):
             continue
         for ref in quoted_evidence(aspect.get("evidence_quotes"), allowed)[:1]:
             state["clarified_aspects"].append({"kind": aspect["kind"], "text": ref["quote"], "evidence_ids": [ref["event_id"]]})
+
+    if state["direction_stage"] == "forming" and not state["research_problem"]:
+        boundary = (previous or {}).get("direction_context_start_event_id", 0)
+        if changed:
+            boundary = max(boundary, latest_id)
+        scoped_events = [event for event in events if event["id"] >= boundary]
+        refinements = [step for step in topic_steps(scoped_events) if step["action"] == "topic_refine"]
+        distinct_refinements = {step["key"] for step in refinements}
+        relation_evidence = valid_ids(raw.get("topic_evidence_ids"), allowed)
+        same_direction_sequence = (state["topic_relation"] == "same"
+                                   and latest_id in relation_evidence
+                                   and len(distinct_refinements) >= 2)
+        grounded_focus = validated_focus_update(raw, events, previous)
+        grounded_aspects = {event_id for aspect in state["clarified_aspects"]
+                            if aspect["kind"] in {"perspective", "scope"}
+                            for event_id in aspect["evidence_ids"]
+                            if event_id >= boundary and event_id in allowed
+                            and allowed[event_id]["type"] == "user_input"}
+        grounded_multi_turn = len(grounded_aspects) >= 2
+        focused_trajectory = (grounded_focus is not None
+                              and grounded_focus["operation"] in {"add", "refine", "compare"}
+                              and latest_id in grounded_focus["evidence_ids"])
+        if not (same_direction_sequence or grounded_multi_turn or focused_trajectory):
+            state["direction_stage"] = "unknown"
+            warnings.append("forming_without_session_evidence")
 
     request = raw.get("support_request")
     request_ids = valid_ids(raw.get("support_request_evidence_ids"), allowed)
@@ -211,11 +249,6 @@ def validate_state(raw, events, previous=None, trace=None):
         if technical_connection(content):
             state["support_request"], state["support_request_evidence_ids"] = "concept", [latest_id]
 
-    topic_ids = valid_ids(raw.get("topic_evidence_ids"), allowed)
-    explicit_shift = bool(re.search(r"다른\s*주제|주제를?\s*바꾸|이제.{0,25}(?:대신|주제로|탐색할)|그건\s*그만", content))
-    action_shift = latest and latest["type"] == "topic_browse" and latest["payload"].get("title") != (previous or {}).get("current_direction")
-    changed = raw.get("topic_relation") == "changed" and latest_id in topic_ids and (explicit_shift or action_shift)
-    state["topic_relation"] = "changed" if changed else ("same" if raw.get("topic_relation") == "same" else "uncertain")
     state["focus_update"] = validated_focus_update(raw, events, previous)
     state["correction_requested"] = correction_request(content)
     if changed and state["research_problem"] and latest_id not in state["problem_evidence_ids"]:
@@ -231,7 +264,6 @@ def validate_state(raw, events, previous=None, trace=None):
             if value and kind != h["type"]:
                 h.setdefault("original_type", h["type"])
                 h["type"] = kind
-    old_through = max([h.get("last_event_id", 0) for h in history] or [0])
     for h in history:
         if h["lifecycle"] in {"active", "unconfirmed"}:
             h["lifecycle"] = "out_of_scope" if changed else "unconfirmed"
@@ -265,66 +297,116 @@ def validate_state(raw, events, previous=None, trace=None):
         if not ids:
             warnings.append("difficulty_without_observation")
             continue
+        target = grounded_difficulty_target(d.get("target"), ids, allowed)
         quotes = quoted_evidence(d.get("evidence_quotes"), allowed)
         direct = [r for r in quotes if r["event_id"] in ids and negative_experience(r["quote"])
                   and negative_experience(allowed[r["event_id"]]["payload"].get("text", ""))]
         if direct:
+            if latest_id not in {ref["event_id"] for ref in direct}:
+                warnings.append("difficulty_reused_old_evidence")
+                continue
             status = "expressed"
             original_kind = kind
             kind = difficulty_kind(kind, direct[0]["quote"])
             if kind != original_kind:
                 warnings.append("difficulty_type_reinterpreted")
+        elif (d.get("status") == "possible" and latest_id in ids and len(set(ids)) >= 2 and target
+              and len(text(d.get("reason"), 240)) >= 12):
+            status = "possible"
         elif kind in bundles and len(set(ids) & set(bundles[kind]["event_ids"])) >= 3 and d.get("status") == "possible":
             status = "possible"
         else:
             warnings.append("difficulty_without_supported_meaning")
             continue
+        if not target and direct:
+            target = direct[0]["quote"][:100]
         if changed and latest_id not in ids:
             continue
-        existing = next((h for h in reversed(history) if h["type"] == kind and h["lifecycle"] in {"active", "unconfirmed"}), None)
+        related_id = text(d.get("related_difficulty_id"), 100)
+        existing = next((h for h in history if related_id and h.get("id") == related_id
+                         and h.get("lifecycle") in {"active", "unconfirmed"}), None)
+        if status == "possible" and existing is None:
+            episode_id = f"difficulty-{min(ids)}-{kind}"
+            existing = next((h for h in history if h.get("id") == episode_id
+                             and h.get("lifecycle") in {"active", "unconfirmed"}), None)
         if existing and existing.get("status") == "expressed" and status == "possible":
-            existing.update(recent_signals=bundles[kind]["signals"], last_behavior_event_id=max(ids))
+            existing.update(recent_signals=bundles[kind]["signals"] if kind in bundles else [], last_behavior_event_id=max(ids))
             continue
         if existing and max(ids) <= existing.get("last_event_id", 0):
             continue
         description = (("탐색에서 어려움을 표현했어요. 어떤 유형인지는 아직 판단하지 않았어요." if kind == "unspecified"
-                        else f"{DIFFICULTY_LABELS[kind]}의 어려움을 직접 표현했어요.") if status == "expressed"
-                       else f"서로 다른 활동 단서가 함께 나타나 {DIFFICULTY_LABELS[kind]} 지원이 필요할 가능성이 있어요. 어려움으로 확정하지 않았어요.")
+                        else f"{DIFFICULTY_LABELS[kind]}의 어려움을 표현했어요.") if status == "expressed"
+                       else f"발화와 세션 내 행동에서 {DIFFICULTY_LABELS[kind]} 지원이 필요할 가능성이 보여요.")
         item = {"type": kind, "status": status, "description": description,
+                "target": target, "inference_reason": text(d.get("reason"), 240),
                 "evidence_ids": ids, "evidence_quotes": direct,
                 "source": "utterance" if status == "expressed" else "behavior",
-                "signals": bundles[kind]["signals"] if status == "possible" else []}
+                "signals": bundles[kind]["signals"] if status == "possible" and kind in bundles else []}
         if existing:
+            if existing.get("type") != kind:
+                existing.setdefault("original_type", existing["type"])
             existing.update(item, lifecycle="active", last_event_id=max(ids))
         else:
-            existing = dict(item, id=f"difficulty-{min(ids)}-{kind}", topic=state["current_direction"], lifecycle="active",
-                            first_event_id=min(ids), last_event_id=max(ids), support_provided=False)
+            episode_start = latest_id if status == "expressed" else min(ids)
+            existing = dict(item, id=f"difficulty-{episode_start}-{kind}", topic=state["current_direction"], lifecycle="active",
+                            first_event_id=episode_start, last_event_id=max(ids), support_provided=False)
             history.append(existing)
         state["difficulties"].append(dict(item, id=existing["id"]))
 
-    open_history = [h for h in history if h["lifecycle"] in {"active", "unconfirmed"}]
+    trackable_history = [h for h in history
+                         if h["lifecycle"] in {"active", "unconfirmed", "out_of_scope"}]
     for update in (raw.get("difficulty_updates") or [])[:8]:
         if not isinstance(update, dict):
             continue
-        h = next((h for h in open_history if h["id"] == update.get("difficulty_id")), None)
-        refs = quoted_evidence(update.get("evidence_quotes"), allowed)
-        refs = [r for r in refs if r["event_id"] > old_through and r["event_id"] == latest_id]
-        if not h or update.get("outcome") != "resolved" or not refs:
+        h = next((item for item in trackable_history
+                  if item["id"] == update.get("difficulty_id")), None)
+        if not h:
             continue
-        original = allowed[latest_id]["payload"].get("text", "")
-        names = {"concept": r"개념|이해|설명|뜻|원리", "connection": r"관련|연결", "selection": r"선택|결정|고르|골랐", "formulation": r"구체화|연구\s*(?:문제|질문)|범위", "unspecified": r"정리|흐름|막막|어려움|방향"}
-        positive = " ".join(clause for clause in _clauses(original) if _resolved_expression(clause)
-                            and any(r["quote"] in clause or clause in r["quote"] for r in refs))
-        if positive and (len(open_history) == 1 or re.search(names[h["type"]], positive)):
-            h.update(lifecycle="resolved", followup_evidence=refs, last_event_id=latest_id)
-            state["difficulties"] = [d for d in state["difficulties"] if d["id"] != h["id"]]
+        outcome = update.get("outcome")
+        if outcome == "unconfirmed":
+            continue
+        event_ids = valid_ids(update.get("evidence_ids"), allowed)
+        fresh_ids = [event_id for event_id in event_ids
+                     if event_id > h.get("last_event_id", 0)
+                     and event_id <= latest_observation_id]
+        if latest_observation_id not in fresh_ids:
+            warnings.append("difficulty_update_without_fresh_evidence")
+            continue
+        followup_events = [allowed[event_id] for event_id in fresh_ids]
+        refs = quoted_evidence(update.get("evidence_quotes"), allowed)
+        refs = [ref for ref in refs if ref["event_id"] in fresh_ids]
+        reason = text(update.get("reason"), 240)
+        explicit = any(_resolved_expression(ref["quote"]) for ref in refs)
+        supported = h.get("support_provided") and len(reason) >= 12
+        if outcome == "resolved":
+            valid_outcome = explicit or supported
+            lifecycle = "resolved"
+            basis = "user_confirmation" if explicit else "followup_activity"
+        elif outcome == "progressed":
+            valid_outcome = supported
+            lifecycle = "progressed"
+            basis = "followup_activity"
+        elif outcome == "redirected":
+            valid_outcome = supported and state.get("topic_relation") == "changed"
+            lifecycle = "redirected"
+            basis = "new_direction_activity"
         else:
-            warnings.append("resolution_without_explicit_followup")
+            valid_outcome = False
+        if not valid_outcome:
+            warnings.append("difficulty_update_not_supported")
+            continue
+        h.update(lifecycle=lifecycle, followup_evidence=[
+            {"event_id": event["id"], "observation": observation(event)}
+            for event in followup_events], outcome_reason=reason, resolution_basis=basis,
+            last_event_id=latest_observation_id)
+        state["difficulties"] = [difficulty for difficulty in state["difficulties"]
+                                 if difficulty.get("id") != h["id"]]
     state["difficulty_history"] = history[-20:]
     state["pending_difficulties"] = pending_difficulties(state)
     if state["difficulties"]:
         state["difficulty_status"] = "expressed" if any(d["status"] == "expressed" for d in state["difficulties"]) else "possible"
-    elif any(h["lifecycle"] == "resolved" and h.get("last_event_id") == latest_id for h in history):
+    elif any(h.get("lifecycle") in {"resolved", "progressed", "redirected"}
+             and h.get("last_event_id") == latest_observation_id for h in history):
         state["difficulty_status"] = "clear"
     elif raw.get("difficulty_status") == "clear":
         warnings.append("clear_without_user_observation")

@@ -2,7 +2,7 @@
 from .difficulty import pending_difficulties
 
 
-POLICY_VERSION = "11.11-v4"
+POLICY_VERSION = "11.12-v1"
 
 
 def select_support(state, latest_action="", has_candidates=False, initial=False):

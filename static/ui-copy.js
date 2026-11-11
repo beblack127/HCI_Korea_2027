@@ -1,6 +1,6 @@
 'use strict';
 // Display-only copy. Stored estimates, quotations, prompts and policy stay intact.
-const UI_REVISION = '11.11-ui1';
+const UI_REVISION = '11.12-ui1';
 function toward(value) {
   const char=Array.from(String(value).trim()).at(-1)||'';
   const code=char.codePointAt(0);
