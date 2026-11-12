@@ -262,6 +262,9 @@ button:hover{background:var(--soft)}
 .workspace.papers-collapsed .papers-pane{display:none}
 .workspace.state-collapsed.papers-collapsed{grid-template-columns:minmax(0,1fr)}
 .workspace.state-collapsed.papers-collapsed .agent-pane{max-width:1080px;width:100%;margin:auto;height:100%}
+body[data-condition=baseline] .workspace .state-pane{display:none!important}
+body[data-condition=baseline] #expandState,body[data-condition=baseline] #collapseState{display:none!important}
+body[data-condition=baseline] .mobile-nav{grid-template-columns:repeat(2,1fr)}
 .mobile-nav{display:none}
 dialog{border:1px solid #cbd6bf;border-radius:9px;width:480px;max-width:calc(100vw - 40px);padding:25px;color:var(--ink);box-shadow:0 20px 80px #16281c33}
 dialog::backdrop{background:#202c2455}

@@ -80,7 +80,7 @@ def create_app(settings=None):
 
     @app.get("/")
     def index():
-        return render_template("index.html")
+        return render_template("index.html", condition="proposed")
 
     @app.get("/api/status")
     def status():

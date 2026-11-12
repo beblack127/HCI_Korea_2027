@@ -2,7 +2,7 @@
 from .difficulty import pending_difficulties
 
 
-POLICY_VERSION = "11.11-v3"
+POLICY_VERSION = "11.12-v2"
 
 
 def select_support(state, latest_action="", has_candidates=False, initial=False):
@@ -20,7 +20,11 @@ def select_support(state, latest_action="", has_candidates=False, initial=False)
     else:
         mode, evidence_ids = "directions", []
         reason = "현재 연구 문제 안의 관점과 범위를 구체화합니다." if state.get("direction_stage") == "forming" else "구분되는 연구 문제의 관점을 살펴볼 수 있도록 제안합니다."
-    breadth = "specific" if state.get("direction_stage") == "forming" else "broad"
+    progress = (state.get("exploration_progress") or {}).get("status")
+    narrowing = progress == "narrowing"
+    breadth = "specific" if state.get("direction_stage") == "forming" or narrowing else "broad"
+    if progress in {"broadening", "revisiting"}:
+        breadth = "broad"
     if latest_action == "browse":
         breadth = "broad"
     elif latest_action == "refine":
@@ -44,7 +48,9 @@ def select_support(state, latest_action="", has_candidates=False, initial=False)
             "commitment_requested": state.get("commitment_requested", False),
             "detail_requested": state.get("detail_requested", False),
             "support_adjustment": adjustment, "system_support_issues": state.get("support_issues", []),
-            "assistance_required": mode != "directions" or bool(adjustment and state.get("recommendation_intent") != "generate")}
+            "focus_correction": state.get("focus_update") if state.get("correction_requested") else None,
+            "correction_requested": bool(state.get("correction_requested")),
+            "assistance_required": mode != "directions" or bool(state.get("correction_requested")) or bool(adjustment and state.get("recommendation_intent") != "generate")}
 
 
 def default_next_step(plan):

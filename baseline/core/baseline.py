@@ -20,8 +20,8 @@ from .browse import browse_response_issues
 from .llm import ModelError
 from .search import SearchError
 
-BASELINE_POLICY_VERSION = "baseline-11.11-v3"
-SOURCE_COMMIT = "c033cb4307d05a1f72df25b1b5bd8e4510d57ad7"
+BASELINE_POLICY_VERSION = "baseline-11.12-v2"
+SOURCE_COMMIT = "bd32971"
 # Explicit-request routing only, matching the proposed request detector.
 LITERATURE_REQUEST = r"(?:논문|문헌).{0,15}(?:추천|찾|보여)|관련\s*논문"
 DETAIL_REQUEST = r"자세히|자세하게|상세히|상세하게|꼼꼼히|단계별로"

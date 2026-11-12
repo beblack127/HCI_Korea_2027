@@ -4,26 +4,27 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="description" content="현재 탐색을 돌아보고, 연구할 다음 방향을 발견하는 학술 탐색 워크스페이스">
-  <title>{{ app_title }}</title>
+  <title>연구 탐색</title>
   <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/static/style.css">
-  <script src="/static/app.js" defer></script>
+  <link rel="stylesheet" href="/static/style.css?v=11.12-ui2">
+  <script src="/static/ui-copy.js?v=11.12-ui2" defer></script>
+  <script src="/static/app.js?v=11.12-ui2" defer></script>
 </head>
 <body data-condition="{{ condition }}">
   <header class="app-header">
-    <div class="brand"><span class="brand-symbol"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h6v16l-3-2-3 2zM15 4h4v16M15 9h4M15 14h4"/></svg></span><span>연구 탐색</span><span class="version">{{ "BASELINE" if condition == "baseline" else "WORKSPACE" }}</span></div>
+    <div class="brand"><span class="brand-symbol"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h6v16l-3-2-3 2zM15 4h4v16M15 9h4M15 14h4"/></svg></span><span>연구 탐색</span></div>
     <div class="header-session"><span class="session-dot"></span><span id="sessionTitle">새 탐색</span></div>
     <div class="header-actions">
-      <span class="connection" id="connectionStatus">연결 확인 중</span>
-      <button class="quiet-button" id="settingsButton" aria-label="연결 설정 안내"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 5h14M3 10h14M3 15h14M7 3v4M13 8v4M8 13v4"/></svg></button>
+      <span class="connection" id="connectionStatus" title="대화와 추천에 AI를 사용해요.">불러오는 중</span>
+      <button class="quiet-button" id="settingsButton" aria-label="설정" title="설정"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 5h14M3 10h14M3 15h14M7 3v4M13 8v4M8 13v4"/></svg></button>
       <button class="button compact" id="newSession"><span aria-hidden="true">＋</span> 새 탐색</button>
     </div>
   </header>
-  <div class="preview-notice" id="previewNotice" hidden><span>미리보기 모드</span> {% if condition == "baseline" %}답변과 추천은 동작 확인용 예시입니다. Gemini API 연결 후 실제 답변을 생성합니다.{% else %}상태와 추천은 동작 확인용 예시입니다. Gemini API 연결 후 실제 추정과 답변을 생성합니다.{% endif %}<button id="previewSettings">연결 방법</button></div>
+  <div class="preview-notice" id="previewNotice" hidden><span>예시 화면</span> 실제 AI 답변과 추천이 아닌 예시를 표시하고 있어요.<button id="previewSettings">자세히</button></div>
   <nav class="mobile-nav" aria-label="작업 영역"><button data-mobile="papers">논문 검색</button><button class="active" data-mobile="agent">탐색 대화</button>{% if condition != "baseline" %}<button data-mobile="state">탐색 상태</button>{% endif %}</nav>
   <main class="workspace{% if condition == 'baseline' %} state-collapsed baseline{% endif %}" id="workspace" data-mobile="agent">
     <aside class="papers-pane" id="papersPane" aria-label="논문 검색">
-      <div class="pane-heading"><div class="heading-left"><span class="pane-index">01</span><h1>논문 검색</h1><span class="source-mark">OpenAlex</span></div><button class="icon-button" id="closePapers" aria-label="논문 검색 패널 접기" aria-controls="papersPane" title="논문 검색 패널 접기"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m12 5-5 5 5 5"/></svg></button></div>
+      <div class="pane-heading"><div class="heading-left"><h1>논문 검색</h1></div><button class="icon-button" id="closePapers" aria-label="논문 검색 패널 접기" aria-controls="papersPane" title="논문 검색 패널 접기"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m12 5-5 5 5 5"/></svg></button></div>
       <div class="paper-tabs" role="tablist" aria-label="논문 목록"><button role="tab" aria-selected="true" id="resultsTab">검색 결과</button><button role="tab" aria-selected="false" id="savedTab">관심 논문 <span id="savedCount">0</span></button></div>
       <div class="search-controls" id="searchControls">
         <form class="paper-search" id="paperSearchForm"><label class="sr-only" for="paperQuery">논문 검색어</label><input id="paperQuery" placeholder="영어 키워드로 논문 검색" maxlength="350"><button class="icon-button" aria-label="논문 검색 실행"><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="8.5" cy="8.5" r="5.5"/><path d="m13 13 4 4"/></svg></button></form>
@@ -31,38 +32,41 @@
         <div class="search-filters"><label><span class="sr-only">정렬</span><select id="paperSort"><option value="relevance">관련도순</option><option value="latest">최신순</option><option value="citations">인용순</option></select></label><span id="resultCount"></span></div>
         <details class="year-filter" id="yearFilterDetails"><summary><span>발행 연도</span><span id="yearFilterSummary">전체 기간</span><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 6 4 4 4-4"/></svg></summary><form id="yearFilterForm"><div class="year-inputs"><label class="sr-only" for="paperYearFrom">시작 연도</label><input id="paperYearFrom" type="number" min="1800" step="1" placeholder="시작" inputmode="numeric"><span>—</span><label class="sr-only" for="paperYearTo">종료 연도</label><input id="paperYearTo" type="number" min="1800" step="1" placeholder="종료" inputmode="numeric"><button class="year-apply" type="submit">적용</button><button class="year-reset" id="resetYears" type="button" aria-label="연도 필터 초기화">초기화</button></div><p class="year-error" id="yearError" role="alert" hidden></p></form></details>
       </div>
-      <div class="paper-list" id="paperList"><div class="paper-empty"><svg viewBox="0 0 40 40" aria-hidden="true"><path d="M11 6h12l7 7v21H11zM23 6v8h7M16 20h9M16 25h9"/></svg><h2>주제를 문헌에서 살펴보기</h2><p>탐색 중 궁금해진 내용을 검색하고,<br>다시 보고 싶은 논문을 담아 두세요.</p></div></div>
-      <div class="paper-footer"><span>제목·저자·연도·초록 제공</span><span>원문은 외부에서 열려요 ↗</span></div>
+      <div class="paper-list" id="paperList"><div class="paper-empty"><svg viewBox="0 0 40 40" aria-hidden="true"><path d="M11 6h12l7 7v21H11zM23 6v8h7M16 20h9M16 25h9"/></svg><h2>관련 논문 찾기</h2><p>영어 키워드로 검색하고<br>관심 있는 논문을 저장하세요.</p></div></div>
+      <div class="paper-footer"><span>논문 정보 · OpenAlex</span><span>원문은 외부에서 열려요 ↗</span></div>
     </aside>
     <section class="agent-pane" aria-label="탐색 대화">
-      <div class="pane-heading agent-heading"><button class="text-button panel-toggle" id="togglePapers" aria-label="논문 검색 패널 접기" aria-controls="papersPane" aria-expanded="true" title="논문 검색 패널 접기"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m12 5-5 5 5 5"/></svg><span>논문 검색</span></button><div class="heading-left agent-title"><span class="pane-index">02</span><h1>탐색 대화</h1><span class="heading-sub">연구할 다음 방향 찾기</span></div>{% if condition != "baseline" %}<button class="text-button panel-toggle" id="expandState" aria-label="탐색 상태 패널 열기" aria-controls="statePane" aria-expanded="false" title="탐색 상태 패널 열기" hidden><span>탐색 상태</span><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m12 5-5 5 5 5"/></svg></button>{% endif %}</div>
+      <div class="pane-heading agent-heading"><button class="text-button panel-toggle" id="togglePapers" aria-label="논문 검색 패널 접기" aria-controls="papersPane" aria-expanded="true" title="논문 검색 패널 접기"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m12 5-5 5 5 5"/></svg><span>논문 검색</span></button><div class="heading-left agent-title"><h1>탐색 대화</h1><span class="heading-sub">연구할 다음 방향 찾기</span></div><button class="text-button panel-toggle" id="expandState" aria-label="탐색 상태 패널 열기" aria-controls="statePane" aria-expanded="false" title="탐색 상태 패널 열기" hidden><span>탐색 상태</span><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m12 5-5 5 5 5"/></svg></button></div>
       <div class="conversation" id="conversation" tabindex="0" aria-label="대화 내용">
-        <div class="welcome" id="welcome"><span class="welcome-kicker"><span class="welcome-rule"></span> RESEARCH NOTE / 01</span><h2>관심을 펼치고,<br>연구할 방향을 찾으세요.</h2><p>아직 명확한 연구 문제가 없어도 괜찮아요.<br>관심 있는 키워드에서 한 걸음씩 이어갑니다.</p><div class="starter-list"><div class="starter-label">이런 관심에서 시작해 볼 수 있어요</div><button data-starter="LLM을 활용한 연구 주제 탐색"><span class="starter-number">01</span>LLM을 활용한 연구 주제 탐색 <span class="starter-arrow">↗</span></button><button data-starter="AI 추천과 사용자의 선택 주도성"><span class="starter-number">02</span>AI 추천과 사용자의 선택 주도성 <span class="starter-arrow">↗</span></button><button data-starter="낯선 분야를 탐색하는 연구자의 어려움"><span class="starter-number">03</span>낯선 분야를 탐색하는 연구자의 어려움 <span class="starter-arrow">↗</span></button></div></div>
+        <div class="welcome" id="welcome"><h2>관심 있는 주제부터<br>시작하세요.</h2><p>키워드나 궁금한 현상을 입력해 보세요.</p><div class="starter-list"><div class="starter-label">예시 주제</div><button data-starter="LLM을 활용한 연구 주제 탐색"><span class="starter-number">01</span>LLM을 활용한 연구 주제 탐색 <span class="starter-arrow" aria-hidden="true">→</span></button><button data-starter="AI 추천과 사용자의 선택 주도성"><span class="starter-number">02</span>AI 추천과 사용자의 선택 주도성 <span class="starter-arrow" aria-hidden="true">→</span></button><button data-starter="낯선 분야를 탐색하는 연구자의 어려움"><span class="starter-number">03</span>낯선 분야를 탐색하는 연구자의 어려움 <span class="starter-arrow" aria-hidden="true">→</span></button></div></div>
         <div id="messages"></div>
-        <div class="thinking" id="thinking" hidden><span class="spinner"></span><div><p id="thinkingPhase" role="status">탐색 맥락을 확인하고 있어요</p><p class="thinking-time" id="thinkingTime" aria-live="off">0초 동안 답변 생성 중</p><p class="thinking-note" id="thinkingNote" hidden>응답이 평소보다 오래 걸리고 있어요. 대기를 유지하고 있습니다.</p></div></div>
+        <div class="thinking" id="thinking" hidden><span class="spinner"></span><div><p id="thinkingPhase" role="status">답변을 준비하고 있어요</p><p class="thinking-time" id="thinkingTime" aria-live="off">0초 동안 답변 생성 중</p><p class="thinking-note" id="thinkingNote" hidden>답변을 기다리고 있어요. 입력한 내용은 유지돼요.</p></div></div>
         <div class="turn-duration" id="turnDuration" hidden></div>
       </div>
-      <div class="composer-area"><div class="inline-error" id="conversationError" role="alert" hidden></div><form class="composer" id="chatForm"><label class="sr-only" for="chatInput">관심 주제나 질문</label><textarea id="chatInput" rows="2" maxlength="4000" placeholder="관심 주제, 더 알고 싶은 내용, 바꾸고 싶은 방향을 적어 보세요."></textarea><div class="composer-bottom"><span>키워드만 입력해도 괜찮아요</span><button type="submit" id="sendButton" class="send-button" aria-label="메시지 보내기"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 15V5M5.5 9.5 10 5l4.5 4.5"/></svg></button></div></form><div class="composer-note">Enter로 전송 · Shift + Enter로 줄바꿈</div></div>
+      <div class="composer-area"><div class="inline-error" id="conversationError" role="alert" hidden></div><form class="composer" id="chatForm"><label class="sr-only" for="chatInput">관심 주제나 질문</label><textarea id="chatInput" rows="2" maxlength="4000" placeholder="관심 주제나 궁금한 내용을 입력하세요."></textarea><div class="composer-bottom"><span>키워드만 입력해도 괜찮아요</span><button type="submit" id="sendButton" class="send-button" aria-label="메시지 보내기"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 15V5M5.5 9.5 10 5l4.5 4.5"/></svg></button></div></form><div class="composer-note">Enter로 전송 · Shift + Enter로 줄바꿈</div></div>
     </section>
-    {% if condition != "baseline" %}<aside class="state-pane" id="statePane" aria-label="탐색 상태">
-      <div class="pane-heading"><div class="heading-left"><span class="pane-index">03</span><h1>탐색 상태</h1></div><button class="icon-button" id="collapseState" aria-label="탐색 상태 패널 접기" aria-controls="statePane" title="탐색 상태 패널 접기"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m8 5 5 5-5 5"/></svg></button></div>
+    <aside class="state-pane" id="statePane" aria-label="탐색 상태">
+      <div class="pane-heading"><div class="heading-left"><h1>탐색 상태</h1></div><button class="icon-button" id="collapseState" aria-label="탐색 상태 패널 접기" aria-controls="statePane" title="탐색 상태 패널 접기"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m8 5 5 5-5 5"/></svg></button></div>
       <div class="state-scroll">
-        <section class="state-current"><div class="section-eyebrow">현재 방향</div><div class="state-status-row"><div id="stageLabel" class="stage-label">탐색 전</div><span id="difficultyBadge" class="difficulty-badge" hidden></span></div><h2 id="currentDirection">관심에서 출발해 보세요</h2><p id="stateSummary" class="muted">대화와 선택을 바탕으로 현재 탐색을 정리합니다.</p><p class="updated-at" id="stateUpdated"></p></section>
-        <section class="state-section" id="changeSection" hidden><h3>직전 탐색에서 달라진 점</h3><p class="muted" id="recentChange"></p></section>
-        <section class="state-section" id="aspectsSection" hidden><h3>지금까지 드러난 내용</h3><p class="section-note">실제 발화에서 확인한 내용 · 확정을 의미하지 않아요</p><div id="clarifiedAspects"></div></section>
-        <section class="state-section" id="problemSection" hidden><h3>검토 중인 연구 문제</h3><p class="muted" id="researchProblem"></p></section>
-        <section class="state-section" id="readinessSection" hidden><h3>탐색 정리 준비</h3><p class="muted" id="readinessMessage"></p><details class="state-details"><summary>정리를 제안한 근거</summary><ul class="state-questions" id="readinessChecks"></ul></details></section>
-        <section class="state-section" id="openSection" hidden><h3>아직 살펴볼 부분</h3><p class="section-note">현재 기록에서 확인되지 않은 내용과 다음 검토 질문</p><ul class="state-questions" id="openQuestions"></ul><div id="observedDirections"></div></section>
-        <section class="state-section difficulty-summary" id="difficultySection" hidden><div class="section-top"><h3>어려움과 지원 방향</h3><span class="difficulty-status" id="difficultyStatus"></span></div><div id="difficultyList"></div><div id="supportIssueList"></div><details id="difficultyHistory" class="difficulty-history" hidden><summary>어려움의 변화 보기</summary><div id="difficultyHistoryList"></div></details></section>
-        <section class="state-section" id="nextSection" hidden><h3>다음에 해볼 일과 이유</h3><p class="next-step" id="nextStep"></p><p class="muted" id="nextReason"></p><div id="selectedConnection" hidden></div><details class="state-details" id="recommendationContext" hidden><summary>후보별 연결 근거</summary><div id="recommendationReasons"></div></details></section>
-        <section class="state-section" id="flowSection" hidden><h3>최근 탐색 흐름</h3><p class="muted" id="flowSummary"></p></section>
-        <details class="state-section state-details" id="evidenceSection"><summary>판단 근거 자세히 보기</summary><div id="evidenceList"><p class="empty-copy">탐색을 시작하면 실제 발화와 행동을 근거로 보여줍니다.</p></div></details>
-        <details class="state-section history-section state-details"><summary>전체 탐색 기록 <span class="small-meta" id="historyCount">0개 활동</span></summary><ol class="history-list" id="historyList"><li class="history-empty">어떤 주제를 살펴봤는지 여기에 기록됩니다.</li></ol></details>
+        <section class="state-current"><div class="section-eyebrow">현재 검토 방향</div><div class="state-status-row"><div id="stageLabel" class="stage-label">탐색 전</div><span id="directionConfidence" class="confidence-label" title="추정된 심리 상태의 확률이 아니라, 표시한 해석을 뒷받침하는 기록의 강도입니다."></span><span id="difficultyBadge" class="difficulty-badge" hidden></span></div><h2 id="currentDirection">관심에서 출발해 보세요</h2><p id="stateSummary" class="muted">대화와 선택을 바탕으로 현재 탐색을 정리합니다.</p><p class="updated-at" id="stateUpdated"></p><details class="state-help"><summary>이 내용은 어떻게 정리되나요?</summary><p>대화와 선택을 바탕으로 정리한 내용으로, 실제 생각과 다를 수 있어요. 주제를 살펴본 기록과 연구 문제의 확정은 구분해요. 해석이 다르면 대화로 알려주세요.</p></details></section>
+        <section class="state-section" id="changeSection" hidden><h3>최근 변경</h3><p class="muted" id="recentChange"></p></section>
+        <section class="state-section" id="nextSection" hidden><h3>다음 탐색</h3><p class="next-step" id="nextStep"></p><p class="muted" id="nextReason"></p><div id="selectedConnection" hidden></div><details class="state-details" id="recommendationContext" hidden><summary>후보별 연결 근거</summary><div id="recommendationReasons"></div></details></section>
+        <section class="state-section difficulty-summary" id="difficultySection" hidden><div class="section-top"><h3>필요한 도움</h3><span class="difficulty-status" id="difficultyStatus"></span></div><div id="difficultyList"></div><div id="supportIssueList"></div></section>
+        <section class="state-section" id="readinessSection" hidden><h3>탐색 정리</h3><p class="muted" id="readinessMessage"></p><details class="state-details"><summary>정리를 제안한 이유</summary><ul class="state-questions" id="readinessChecks"></ul></details></section>
+        <details class="state-section state-details" id="stateDetails"><summary>탐색 내용 자세히 보기</summary><section class="state-section" id="aspectsSection" hidden><h3>정리된 내용</h3><div id="clarifiedAspects"></div></section><section class="state-section" id="problemSection" hidden><h3>검토 중인 연구 문제</h3><p class="muted" id="researchProblem"></p></section><section class="state-section" id="openSection" hidden><h3>추가로 확인할 점</h3><ul class="state-questions" id="openQuestions"></ul><div id="observedDirections"></div></section><details id="difficultyHistory" class="difficulty-history" hidden><summary>어려움의 변화 보기</summary><div id="difficultyHistoryList"></div></details></details>
+        <details class="state-section state-details" id="evidenceSection"><summary>이렇게 정리한 이유</summary><div id="evidenceList"><p class="empty-copy">탐색을 시작하면 실제 발화와 행동을 근거로 보여줍니다.</p></div></details>
+        <details class="state-section history-section state-details"><summary>탐색 기록 <span class="small-meta" id="historyCount">0개 활동</span></summary><section class="state-section" id="flowSection" hidden><h3>최근 탐색 흐름</h3><p class="muted" id="flowSummary"></p></section><ol class="history-list" id="historyList"><li class="history-empty">어떤 주제를 살펴봤는지 여기에 기록됩니다.</li></ol></details>
       </div>
       <div class="state-footer"><span>현재 세션의 기록</span><a href="/api/session/export" download aria-label="현재 세션 기록 내보내기">내보내기 ↗</a></div>
-    </aside>{% endif %}
+    </aside>
   </main>
   <div class="toast" id="toast" role="status" hidden></div>
-  <dialog id="settingsDialog"><div class="dialog-heading"><h2>초기 버전 연결 설정</h2><button class="icon-button" id="closeSettings" aria-label="설정 안내 닫기">×</button></div><p>시스템 폴더의 <code>.env</code> 파일에서 설정할 수 있어요.</p><dl class="connection-details"><dt>Gemini</dt><dd id="settingsModel">확인 중</dd>{% if condition != "baseline" %}<dt>상태 추정</dt><dd id="settingsMode"></dd>{% endif %}<dt>논문 검색</dt><dd>OpenAlex 공개 API</dd></dl><ol class="setup-steps"><li><code>.env</code>의 <code>GEMINI_API_KEY=</code> 뒤에 키를 입력하세요.</li><li>실행 중인 터미널에서 서버를 종료한 뒤 <code>{{ "run_baseline.command" if condition == "baseline" else "run.command" }}</code>를 다시 실행하세요.</li><li>‘Gemini 모드’로 바뀌면 주제를 입력해 실제 응답을 확인하세요.</li></ol><p class="small-meta">{% if condition != "baseline" %}현재 API 미연결 미리보기는 검증된 인지 상태 추정이 아닙니다. {% endif %} 입력한 API 키는 브라우저에 전달되지 않습니다.</p><button class="button primary dialog-done" id="doneSettings">확인</button></dialog>
+  <dialog id="settingsDialog">
+    <div class="dialog-heading"><h2>설정</h2><button class="icon-button" id="closeSettings" aria-label="설정 닫기">×</button></div>
+    <p>대화와 주제 추천에 AI를 사용해요. 논문 정보는 OpenAlex에서 가져와요.</p>
+    <dl class="connection-details"><dt>답변 생성</dt><dd id="settingsModel">확인 중</dd><dt>이용 방식</dt><dd id="settingsUsage"></dd><dt>논문 정보</dt><dd>OpenAlex</dd></dl>
+    <details class="researcher-settings"><summary>연구자용 연결 정보</summary><p>연결 설정은 시스템 폴더의 <code>.env</code>에서 관리해요.</p><ol class="setup-steps"><li><code>GEMINI_API_KEY</code>와 <code>OPENALEX_API_KEY</code>를 설정해요.</li><li>설정을 바꾸면 서버를 종료한 뒤 <code>run.command</code>를 다시 실행해요.</li></ol><p class="small-meta">예시 화면에서는 실제 AI 답변을 생성하지 않아요. API 키는 브라우저에 전달되지 않아요.</p><p class="small-meta" id="settingsVersion"></p></details>
+    <button class="button primary dialog-done" id="doneSettings">닫기</button>
+  </dialog>
 </body>
 </html>

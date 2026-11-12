@@ -2,6 +2,7 @@
 import re
 from .difficulty import LABELS, pending_difficulties
 from .behavior import topic_steps
+from .progress import enrich_progress
 
 RELATION_LABELS = {"problem": "문제 살펴보기", "perspective": "관점 더하기", "scope": "범위 좁히기",
                    "concept": "개념 연결", "continuation": "현재 방향 이어가기"}
@@ -20,22 +21,46 @@ def compact(value, sentences=1, limit=150):
 def chat_summary(state):
     topic = compact(state.get("research_problem") or state.get("current_direction"), limit=70)
     active = state.get("difficulties") or []
+    pending = pending_difficulties(state)
+    progress = state.get("exploration_progress") or {}
     expressed = next((d for d in active if d.get("status") == "expressed"), None)
     labels = LABELS
+    if progress.get("status") in {"reviewing", "narrowing", "broadening", "revising", "revisiting"}:
+        focus = compact(progress.get("focus"), limit=65)
+        if progress["status"] == "broadening":
+            summary = f"‘{focus}’의 관심을 유지하며 다른 연구 방향도 살펴보려 하고 있어요."
+        elif progress["status"] == "revisiting":
+            summary = f"‘{focus}’와 관련된 검토 지점으로 되돌아오는 흐름이 보여요."
+        elif progress["status"] == "revising":
+            summary = f"최근 정정을 반영해 ‘{focus}’ 쪽으로 검토 관점을 조정하고 있어요."
+        elif progress["status"] == "narrowing":
+            summary = f"최근 ‘{focus}’ 안의 문제·범위를 좁혀 검토하고 있어요."
+        else:
+            summary = f"최근 ‘{focus}’와 관련된 관점을 검토하고 있어요."
+        if expressed:
+            label = labels.get(expressed["type"], "탐색")
+            summary += (" 어려움을 표현했어요." if expressed["type"] == "unspecified"
+                        else f" {label}의 어려움을 표현했어요.")
+        elif active:
+            label = labels.get(active[0]["type"], "탐색")
+            summary += f" {label} 도움이 필요할 수 있다는 흐름이 보여요."
+        elif pending:
+            label = labels.get(pending[-1]["type"], "탐색")
+            summary += f" 이전 {label} 어려움의 후속 변화를 살펴보고 있어요."
+        return summary
     if expressed:
         if expressed["type"] == "unspecified":
             return "탐색에서 어려움을 표현했어요. 어떤 유형인지는 아직 판단하지 않았어요."
         return f"‘{topic}’을 살펴보며 {labels[expressed['type']]}의 어려움을 표현했어요." if topic else f"{labels[expressed['type']]}의 어려움을 표현했어요."
     if active:
         return f"활동 흐름에서 {labels.get(active[0]['type'], '탐색')} 지원이 필요할 가능성이 있어요."
-    pending = pending_difficulties(state)
     if pending:
-        label = labels.get(pending[-1]["type"], "탐색") if pending[-1]["type"] != "unspecified" else "탐색"
-        return f"이전에 표현한 {label}의 어려움은 해소 여부가 아직 확인되지 않았어요."
+        label = labels.get(pending[-1]["type"], "탐색")
+        return f"이전에 표현한 {label} 어려움의 후속 변화를 살펴보고 있어요."
     if state.get("direction_stage") == "forming" and topic:
         return f"‘{topic}’에 관한 연구 문제의 범위를 구체화하고 있어요."
     if topic:
-        suffix = "구체화 정도는 판단 유보 중이에요" if state.get("direction_stage") == "unknown" else "관련 관점을 살펴보고 있어요"
+        suffix = "구체화 정도는 아직 분명하지 않아요" if state.get("direction_stage") == "unknown" else "관련 관점을 살펴보고 있어요"
         return f"현재 관심은 ‘{topic}’이며, {suffix}."
     return "현재 기록만으로는 탐색 방향과 구체화 정도를 판단하기 어려워요."
 
@@ -50,8 +75,7 @@ def enrich_state(state, events, previous=None):
         boundary = latest["id"]
     state["direction_context_start_event_id"] = boundary
     scoped = [e for e in events if e["id"] >= boundary]
-    state["chat_summary"] = chat_summary(state)
-    state["display_version"] = "11.10-v3"
+    state["display_version"] = "11.12-v2"
     choices = [e for e in scoped if e["type"] in {"topic_select", "topic_browse", "topic_refine"}]
     seen, directions = set(), []
     choice_labels = {"topic_select": "후보 선택", "topic_browse": "둘러보기", "topic_refine": "구체화하기"}
@@ -72,15 +96,29 @@ def enrich_state(state, events, previous=None):
             if not any(a["kind"] == aspect["kind"] and a["text"] == aspect["text"] for a in aspects):
                 aspects.append(aspect)
     state["clarified_aspects"] = aspects[:4]
+    enrich_progress(state, events, previous)
     if not state.get("clarified_aspects"):
         initial = next((e for e in scoped if e["type"] == "user_input"), None)
-        state["clarified_aspects"] = ([{"kind": "interest", "text": initial["payload"].get("text", ""),
+        focus_change = (state.get("focus_history") or [None])[-1]
+        state["clarified_aspects"] = ([{"kind": "perspective", "text": focus_change["current_focus"],
+                                       "evidence_ids": focus_change["evidence_ids"]}] if focus_change else
+                                     [{"kind": "interest", "text": initial["payload"].get("text", ""),
                                        "evidence_ids": [initial["id"]]}] if initial else [])
     if state.get("research_problem") and not any(a["kind"] == "problem" for a in state["clarified_aspects"]):
         state["clarified_aspects"].append({"kind": "problem", "text": state["research_problem"],
                                            "evidence_ids": state.get("problem_evidence_ids", [])})
     state["change_evidence_ids"] = [latest["id"]] if latest else []
-    if not latest:
+    update = state.get("focus_update")
+    if update and update["operation"] == "branch":
+        state["change_evidence_ids"] = update["evidence_ids"]
+        state["recent_change"] = f"현재 관심을 유지하며 다른 연구 방향 후보도 요청했어요. 새 후보를 선택하기 전까지 기존 방향은 그대로 둡니다."
+    elif update:
+        target = compact(update["current_focus"], limit=90)
+        source = compact(update["previous_focus"], limit=70)
+        state["change_evidence_ids"] = update["evidence_ids"]
+        state["recent_change"] = (f"‘{source}’보다 ‘{target}’에 관심을 두려는 정정이 드러났어요."
+                                  if update["operation"] == "replace" else f"이번 발화에서 ‘{target}’이라는 검토 관점이 {'구체화' if update['operation']=='refine' else '추가'}됐어요.")
+    elif not latest:
         state["recent_change"] = "변화를 비교할 기록이 아직 충분하지 않아요."
     elif not previous:
         state["recent_change"] = "관심 주제나 질문을 입력하며 이번 탐색을 시작했어요."
@@ -117,4 +155,8 @@ def enrich_state(state, events, previous=None):
     state["open_questions"] = state.get("unresolved", [])[:3]
     if not state["open_questions"] and not state.get("research_problem"):
         state["open_questions"] = ["현재 관심에서 어떤 현상이나 문제를 살펴볼지"]
+    state["chat_summary"] = chat_summary(state)
+    progress = state.get("exploration_progress") or {}
+    if progress.get("status") in {"reviewing", "narrowing", "broadening", "revising", "revisiting"}:
+        state["summary"] = progress["description"] + (" 연구 문제의 명시 여부와 별개로 관찰한 검토 흐름이에요." if not state.get("research_problem") else " 연구 문제의 최종 확정을 의미하지는 않아요.")
     return state

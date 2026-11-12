@@ -17,7 +17,7 @@ services:
     name: hci-korea-sense-study
     runtime: python
     rootDir: .
-    plan: 0.1c-256mb
+    plan: 0.5c-512mb
     buildCommand: pip install -r requirements.txt
     startCommand: gunicorn --bind 0.0.0.0:$PORT --workers 1 --threads 4 --timeout 360 wsgi:app
     healthCheckPath: /api/status
@@ -43,7 +43,7 @@ services:
     name: hci-korea-baseline-study
     runtime: python
     rootDir: baseline
-    plan: 0.1c-256mb
+    plan: 0.5c-512mb
     buildCommand: pip install -r requirements.txt
     startCommand: gunicorn --bind 0.0.0.0:$PORT --workers 1 --threads 4 --timeout 360 wsgi:app
     healthCheckPath: /api/status

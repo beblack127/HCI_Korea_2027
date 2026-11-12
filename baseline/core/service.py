@@ -10,7 +10,7 @@ from .policy import select_support, default_next_step, POLICY_VERSION
 from .search import OpenAlex, SearchError
 from .state import preview_state, validate_state, text, behavior_signals, OBSERVATIONS
 from .presentation import compact, enrich_state, RELATION_LABELS
-from .browse import browse_response_issues
+from .browse import completed_response_issues
 from .readiness import assess_readiness, offer_wrapup, session_recap
 from .behavior import topic_key, support_issues
 from .difficulty import difficulty_view, pending_difficulties
@@ -340,30 +340,45 @@ class Workspace:
                 "latest_action": action, "latest_input": display, "selected_direction": candidate,
                 "available_directions": context["available_directions"],
                 "messages": context["messages"], "supplied_papers": papers, "retrieval_error": retrieval_error}
-            if plan["mode"] == "browse":
-                checks = []
-                for attempt in range(2):
-                    # Provider failures propagate normally; only completed but invalid content is repaired.
-                    raw_response = self.llm.generate(self.prompt("respond"), response_context)
-                    try:
-                        response = clean_response(raw_response, papers, plan)
-                    except ModelError:
-                        issues = ["invalid_response_content"]
-                    else:
-                        issues = browse_response_issues(response, context["available_directions"])
-                    checks.append(issues)
-                    provenance["browse_validation"] = {"attempts": attempt + 1, "issues_by_attempt": checks,
-                        "status": "passed" if not issues else "repairing" if attempt == 0 else "failed"}
-                    if not issues:
-                        break
-                    if attempt == 1:
-                        raise ModelError("둘러보기 설명과 새로운 후보를 충분히 구성하지 못했습니다. 추정된 상태는 보관되어 있으니 다시 시도해 주세요.")
-                    response_context = dict(response_context, response_validation={
-                        "issues": issues,
-                        "previous_proposal": raw_response,
-                        "instruction": "선택한 주제의 문제와 상황 예시를 짧게 설명하고, 그 주제와 연결된 서로 다른 측면 3개를 새로 제안하세요. 직전 후보의 제목이나 설명을 그대로 재사용하지 마세요. 연구 문제의 확정이나 이해를 가정하지 마세요."})
-            else:
-                response = clean_response(self.llm.generate(self.prompt("respond"), response_context), papers, plan)
+            validation_mode = "directions" if plan.get("correction_requested") else plan["mode"]
+            checked_mode = validation_mode in {"browse", "directions", "formulate"}
+            checks = []
+            for attempt in range(2 if checked_mode else 1):
+                # Provider failures propagate; only completed invalid content is repaired.
+                raw_response = self.llm.generate(self.prompt("respond"), response_context)
+                try:
+                    response = clean_response(raw_response, papers, plan)
+                except ModelError:
+                    if not checked_mode:
+                        raise
+                    issues = ["invalid_response_content"]
+                else:
+                    issues = completed_response_issues(response, context["available_directions"], validation_mode, candidate, display)
+                checks.append(issues)
+                quality = {"attempts": attempt + 1, "issues_by_attempt": checks,
+                           "status": "passed" if not issues else "repairing" if attempt == 0 else "failed"}
+                provenance["response_validation"] = quality
+                if plan["mode"] == "browse":
+                    provenance["browse_validation"] = quality
+                state["response_quality"] = quality
+                if not issues:
+                    if attempt:
+                        self.store.event(sid, "response_validation", {"request_id": request_id, "mode": plan["mode"],
+                            "status": "repaired", "issues": checks[0]}, request_id + ":validation")
+                    break
+                if attempt == 1:
+                    event = self.store.event(sid, "response_validation", {"request_id": request_id, "mode": plan["mode"],
+                        "status": "failed", "issues": issues}, request_id + ":validation")
+                    state["support_issues"] = [{"type": "candidate_generation", "event_ids": [event["id"]],
+                        "observation": "새 검토 정보를 충분히 구성하지 못했어요. 사용자 어려움이 아닌 시스템 응답 문제로 기록했어요."}]
+                    label = "둘러보기 설명" if plan["mode"] == "browse" else "설명"
+                    raise ModelError(label + "과 새로운 검토 후보를 충분히 구성하지 못했습니다. 입력은 보관되어 있으니 다시 시도해 주세요.")
+                response_context = dict(response_context, response_validation={
+                    "issues": issues, "previous_proposal": raw_response,
+                    "instruction": ("선택한 주제의 문제와 상황 예시를 짧게 설명하고 연결된 서로 다른 측면 3개를 새로 제안하세요."
+                                    if plan["mode"] == "browse" else
+                                    "현재 입력과 선택을 반영해 새 검토 정보를 제공하세요. 구체화 요청이면 선택한 주제보다 하위의 문제·상황·범위·접근 3개를 제안하세요.")
+                                   + " 제목만 바꾸거나 같은 제목·설명을 다시 나열하지 마세요. 이해나 연구 문제의 확정을 가정하지 마세요."})
         else:
             response = preview_response(state, plan, context, papers)
         response.update({"state_summary": state.get("chat_summary", state["summary"]), "mode": "gemini" if self.settings.live else "preview",
@@ -394,12 +409,14 @@ class Workspace:
         provenance.update(phase_seconds=timings,
                           context_characters={"estimate": len(json.dumps(context, ensure_ascii=False)),
                                               "response": len(json.dumps(response_context, ensure_ascii=False)) if self.settings.live else 0})
-        self.store.put_estimate(sid, request_id, through, state, plan, provenance)
         self.store.add_message(sid, request_id + ":assistant", "assistant", response)
         self.store.event(sid, "agent_response", {"request_id": request_id, "state_summary": response["state_summary"],
             "offered_options": response["recommendations"], "support_mode": plan["mode"],
             "assistance_excerpt": response.get("assistance", {}).get("body", ""),
             "estimate_through_event_id": through, "provenance": provenance}, request_id + ":response")
+        # Check the just-created response, not only the previous pair on the next turn.
+        state["support_issues"] = support_issues(self.store.events(sid))
+        self.store.put_estimate(sid, request_id, through, state, plan, provenance)
         result = {"response": response, "request_id": request_id}
         self.store.finish_turn(sid, request_id, result)
         return dict(result, snapshot=self.store.snapshot(sid))

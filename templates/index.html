@@ -10,7 +10,7 @@
   <script src="/static/ui-copy.js?v=11.12-ui2" defer></script>
   <script src="/static/app.js?v=11.12-ui2" defer></script>
 </head>
-<body>
+<body data-condition="{{ condition }}">
   <header class="app-header">
     <div class="brand"><span class="brand-symbol"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h6v16l-3-2-3 2zM15 4h4v16M15 9h4M15 14h4"/></svg></span><span>연구 탐색</span></div>
     <div class="header-session"><span class="session-dot"></span><span id="sessionTitle">새 탐색</span></div>
@@ -21,8 +21,8 @@
     </div>
   </header>
   <div class="preview-notice" id="previewNotice" hidden><span>예시 화면</span> 실제 AI 답변과 추천이 아닌 예시를 표시하고 있어요.<button id="previewSettings">자세히</button></div>
-  <nav class="mobile-nav" aria-label="작업 영역"><button data-mobile="papers">논문 검색</button><button class="active" data-mobile="agent">탐색 대화</button><button data-mobile="state">탐색 상태</button></nav>
-  <main class="workspace" id="workspace" data-mobile="agent">
+  <nav class="mobile-nav" aria-label="작업 영역"><button data-mobile="papers">논문 검색</button><button class="active" data-mobile="agent">탐색 대화</button>{% if condition != "baseline" %}<button data-mobile="state">탐색 상태</button>{% endif %}</nav>
+  <main class="workspace{% if condition == 'baseline' %} state-collapsed baseline{% endif %}" id="workspace" data-mobile="agent">
     <aside class="papers-pane" id="papersPane" aria-label="논문 검색">
       <div class="pane-heading"><div class="heading-left"><h1>논문 검색</h1></div><button class="icon-button" id="closePapers" aria-label="논문 검색 패널 접기" aria-controls="papersPane" title="논문 검색 패널 접기"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m12 5-5 5 5 5"/></svg></button></div>
       <div class="paper-tabs" role="tablist" aria-label="논문 목록"><button role="tab" aria-selected="true" id="resultsTab">검색 결과</button><button role="tab" aria-selected="false" id="savedTab">관심 논문 <span id="savedCount">0</span></button></div>

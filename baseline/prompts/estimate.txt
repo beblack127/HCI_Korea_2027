@@ -4,10 +4,19 @@ prior_estimate는 이전 가설이며 증거가 아니다. 관찰 증거는 제�
 
 [방향과 근거]
 - exploring: 관심과 후보를 살피지만 다룰 연구 문제가 사용자에게서 아직 드러나지 않음.
-- forming: 사용자가 다룰 문제·관계·현상을 표현했고 그 안에서 범위·관점·접근을 구체화함. keyword/클릭만으로 판정하지 않는다.
-- unknown: 위 구분에 필요한 근거가 부족함.
+- forming: 세션 흐름에서 사용자의 연구 방향이 좁혀지거나 관점·범위가 구체화되고 있음. 명시적 문제 발화뿐 아니라 반복된 구체화 선택과 근거 있는 관점 변화도 함께 평가한다.
+- unknown: 세션 전체의 기록으로도 탐색과 구체화의 차이를 판단할 근거가 부족함.
+current_direction은 세션의 큰 관심을 잇는 기준점이다. 개념 정의·모델 종류·문헌을 묻는 각 턴의 명사로 기준점을 덮어쓰지 않는다. 관련된 후속 질문은 기존 관심에 검토 관점을 더한다.
+기준점이 유지되는 동안 direction_stage는 이전 추정과 최근 흐름을 함께 비교한다. 방향 형성 근거가 유지되면 질문 한 번으로 exploring/unknown으로 되돌리지 않는다. 반대로 새 후보 요청이나 추가 질문만으로 forming이라 단정하지 않는다. 관심 방향이 드러나고 아직 좁혀지지 않았다면 exploring을 사용하며, 방향 자체를 식별하기 어려울 때 unknown을 쓴다.
 research_problem에는 사용자가 드러낸 내용만 기록한다. problem_evidence는 event_id와 사용자 발화에서 그대로 복사한 quote를 제공한다. 'LLM 사용자 의도' 같은 짧은 관심사에서 구체적인 연구 문제를 만들어 넣지 않는다. 이전 연구 문제를 유지하면 해당 실제 사용자 발화를 다시 인용한다. 명시적 연구 문제 근거가 없으면 research_problem과 problem_evidence를 비운다.
+direction_stage는 세션 흐름을 종합한 LLM의 판단이다. 서버는 선택·발화 근거가 실제 세션에 있는지 확인하되, 완성된 연구 문제 문장이나 특정 표현을 forming의 필수 조건으로 삼지 않는다. research_problem이 비어 있어도 탐색 진전과 방향 형성은 별도로 판단한다.
 current_direction은 실제 사용자 입력과 선택에서 드러난 범위만 정리한다. 어려움의 유무와 방향 형성은 독립적이며, 넓게 둘러보는 행위는 실패가 아니다.
+
+[세션 흐름과 변화]
+trajectory_assessment는 현재 stage와 별도로 여러 턴의 방향 변화를 분류한다. reviewing은 같은 관심 안의 개념·방법·관점 검토, narrowing은 초점이나 범위가 좁아짐, broadening은 기존 관심을 두고 대안이나 연관 관점을 더 살핌, revisiting은 같은 문제·관점으로 되돌아가 반복 검토함, uncertain은 근거 부족이다.
+각 변화에는 이번 최신 관찰을 포함한 실제 사용자 event_id와 짧은 reason을 제공한다. broadening/revisiting은 한 번의 단순 질문으로 추정하지 않는다. 반복된 흐름이 확인되면 그 흐름을 뒷받침하는 서로 다른 이벤트를 연결한다. 반복 검토 자체는 어려움이나 실패를 뜻하지 않는다.
+direction_confidence와 trajectory_assessment.confidence는 high/medium/low로 제안한다. 직접적인 사용자 표현은 high, 여러 관련 관찰의 종합은 medium, 관찰이 적거나 해석이 갈리면 low다. 확신도는 자기보고된 인지 상태가 아니라 추정 근거의 강도를 뜻한다.
+focus_update.operation=branch는 사용자가 기존 후보 외의 대안·새 주제를 요청한 경우다. 예를 들어 '이 세 개 말고 다른 주제는 없어?'는 branch이며 replace가 아니다. 대안을 요청한 것만으로 기존 관심을 폐기하거나 새 방향을 채택했다고 해석하지 않는다. replace는 사용자가 무엇에서 무엇으로 관심을 옮기는지 발화에서 분명히 정정한 경우에만 사용한다.
 
 [요청과 어려움은 별개]
 support_request는 이번 입력이 요청하는 도움: directions/concept/connection/compare/formulate/literature. evidence_ids에는 최신 user_input을 참조한다.
@@ -15,14 +24,15 @@ support_request는 이번 입력이 요청하는 도움: directions/concept/conn
 '설명을 봐도 이해가 안 돼'는 concept, '이 후보가 내 관심과 어떻게 연결되는지 모르겠어'는 connection, '뭘 골라야 할지 모르겠어'는 selection, '이걸 연구 문제로 어떻게 구체화할지 모르겠어'는 formulation의 직접 어려움 표현이다.
 표현의 의미를 읽으며 '어렵다'라는 단어를 요구하지 않는다. '후보 차이가 안 와닿아'는 selection, '설명이 머리에 안 들어와'는 concept으로 볼 수 있다. '빙빙 도는 느낌', '지금 뭘 하고 있는지 모르겠어', '아직 막막해'처럼 어려움은 표현했으나 원인이 불분명하면 type=unspecified, status=expressed로 두고 네 유형 중 하나를 강제로 고르지 않는다. 부정·가정·다른 사람의 경험·연구 대상의 어려움을 본인 경험으로 바꾸지 않는다.
 connection은 현재 자신의 관심·연구 문제와 추천의 관련성에 관한 어려움이다. '임베딩을 사용자 의도와 어떻게 연결하는지 모르겠어'처럼 기술 요소의 결합·작동 원리를 이해하는 문제는 concept이다. '연결'이라는 단어만으로 connection을 선택하지 않는다.
-각 difficulty는 evidence_ids와 evidence_quotes(event_id, 실제 원문의 정확한 quote)를 포함한다. 직접 표현은 expressed. 행동만으로 expressed를 만들지 않는다.
-behavior_signals는 선택·실행을 묶고 제목을 정규화한 서버 관찰이다. 반복 선택 하나로 어려움을 만들지 않는다. 서로 다른 종류(family)의 단서가 같은 지원을 가리키고 최신 행동이 포함된 경우에만 possible을 제안한다. 행동 기반 possible은 해당 사용자 이벤트의 evidence_ids를 제공하고 evidence_quotes는 비워도 된다. 직접 어려움 발화는 필수가 아니다. 서버는 복수 종류의 단서·최신성·사용자 이벤트 근거를 다시 검사한다. 하나의 논문 열람/저장, 오래 머무르기, 패널 열기는 근거가 아니다. 단서가 모호하면 판단 유보한다.
+각 difficulty는 target, reason, confidence, evidence_ids, evidence_quotes, related_difficulty_id를 포함한다. target은 발화·선택·검색에서 실제로 드러난 막힌 대상이며, reason은 그 근거가 어려움 유형을 시사하는 이유다. 기존 이력은 target과 어려움 유형이 모두 같은 경우에만 difficulty_id를 연결한다. 새로운 난점이나 다른 target을 같은 ID로 덮어쓰지 않는다. 직접 어려움 표현은 expressed/high로 기록하고, 행동만으로 expressed를 만들지 않는다. 여러 사용자 관찰을 종합한 possible은 medium 이하로 둔다.
+behavior_signals는 선택·실행을 묶고 제목을 정규화한 서버 관찰이다. 반복 선택 하나로 어려움을 확정하지 않는다. 발화의 표현과 세션 내 행동을 함께 읽고, 직접적인 어려움 표현이 없어도 여러 실제 사용자 이벤트가 같은 난점의 반복 접근·미해결을 시사하면 LLM이 possible을 추정할 수 있다. possible에는 최신 관찰을 포함한 2개 이상의 실제 사용자 event_id와 그 해석 reason을 제공한다. 단일 개념 질문, 논문 열람·저장, 오래 머무르기, 패널 열기는 각각 그 자체로 어려움의 근거가 아니다. 시스템이 생성한 추천 반복은 사용자 어려움으로 바꾸지 않는다. 근거가 모호하면 판단을 유보한다.
 support_issues의 후보 반복은 시스템 응답의 문제다. 이를 사용자의 어려움·이해 부족으로 바꾸지 않는다. 시스템 오류 뒤 성공 응답 없이 반복 전송된 요청과 대기 시간은 어려움 신호로 삼지 않는다.
 
 [어려움의 변화]
-이전 difficulty_history의 id를 유지해 참조한다. 이전 어려움을 새로 관찰하지 못했으면 해소됐다고 하지 말고 unconfirmed로 둔다. 서버는 새 근거가 없는 이전 어려움을 '후속 확인 전'으로 보관한다.
+이전 difficulty_history의 id를 target과 탐색 맥락에 맞춰 참조한다. 어려움은 대상·발생 시점별로 구분한다. 후속 흐름이 기존 난점과 연결되지 않거나 해석이 모호하면 unconfirmed로 둔다.
 이전에 표현한 어려움은 pending_difficulties로 현재 패널에도 표시된다. 같은 과거 발화를 다시 인용해 새로운 expressed를 만들지 않는다. 새로운 선택이나 구체화하기 자체는 해소 근거가 아니다. 관련된 도움은 현재 요청 안에서 제공하며 매번 자기보고·추가 선택을 요구하지 않는다.
-사용자가 이후 발화에서 해당 어려움의 해소를 명확히 드러낼 때만 difficulty_updates에 outcome=resolved와 정확한 evidence_quotes를 기록한다. '고마워', 논문 저장, 에이전트 설명 제공만으로 해결을 판단하지 않는다. 여러 어려움이 있으면 어느 어려움에 대한 확인인지 구분한다.
+후속 관찰을 보고 difficulty_updates의 outcome을 difficulty_id별로 판단한다. resolved는 어려움이 해소되어 해당 개념·후보를 이후 검토에 활용하거나 다음 구체화로 이어간 흐름이다. progressed는 같은 난점을 다루는 검토가 이어지고 일부 진전이 보이나 완전한 해소까지 단정하기 이른 경우다. redirected는 이전 난점에서 방향을 바꾼 뒤 새 방향의 탐색이 이어진 경우다. unconfirmed는 이후 행동이 그 대상과 연결되지 않거나 해석이 모호한 경우다.
+직접 확인 발화는 근거로 쓰되 요구하지 않는다. '고마워', 논문 한 편 저장, 원문 한 번 열기, 에이전트의 설명만으로 해결을 판단하지 않는다. 후속 사용자 발화·선택·검색·열람 중 실제 event_id를 evidence_ids에 적고, 그 행동이 이전 어려움의 target과 어떻게 이어지는지 reason에 설명한다. 인용할 사용자 발화가 있으면 정확한 evidence_quotes도 제공한다. 기존 difficulty_id를 반드시 연결한다. 시스템 응답 자체는 사용자 변화의 증거가 아니다.
 topic_relation은 same/changed/uncertain. 주제 변경은 실제 최신 사용자 발화·선택의 topic_evidence_ids로 뒷받침한다. 단순한 표현 변경이나 같은 문제의 구체화를 주제 변경으로 보지 않는다. 변경은 해결과 다르다.
 
 [탐색 요청의 범위]
@@ -43,3 +53,10 @@ summary는 1~2문장 제안이며 서버가 검증 결과로 재구성한다. ev
 clarified_aspects에는 이번 세션에서 실제 발화로 드러난 관심(interest), 연구 문제(problem), 관점(perspective), 범위(scope)를 최대 4개 제안한다. 각각 kind와 실제 발화의 정확한 evidence_quotes를 제공한다. 사용자에게서 드러나지 않은 대상·방법·조건을 채우거나 사용자가 확정했다고 말하지 않는다. 사용자의 선택·논문 열람을 명시적 확정으로 바꾸지 않는다.
 unresolved는 최대 3개이며 현재 대화에서 아직 드러나지 않은 문제·관점·범위에 관한 짧은 검토 질문으로 쓴다. '사용자가 정하지 못했다/이해하지 못했다'는 진단이 아니다. 모든 연구에 대상·방법·조건 체크리스트를 강제하지 않는다.
 recent_change는 이전에 비해 어떤 문제·관점·범위가 추가됐는지 제안하되, 화면의 변화 설명은 서버가 검증한 사용자 발화·행동에서 다시 구성한다. agent_response에서 새로운 지식을 설명했다는 이유로 이해가 향상됐다고 하지 않는다.
+
+[관찰된 진전과 명시적인 연구 문제의 분리]
+선택·둘러보기·구체화 요청의 흐름은 서버가 exploration_progress로 따로 기록한다. 연구 문제가 직접 발화로 명시되지 않았다는 이유로 관찰된 범위 축소나 관점 정정까지 없었다고 쓰지 않는다. 반대로 여러 선택이 있었다고 연구 문제의 확정·이해를 만들지 않는다.
+problem_basis는 직접 발화에 드러난 연구할 현상의 구조다. kind는 phenomenon(관찰·이해할 현상), relationship(관계·차이), design_goal(설계할 지원), none 중 하나다. '영향/차이'라는 단어가 없어도 구별되는 상황에서 무엇을 살펴볼지 드러나면 phenomenon일 수 있다. subject와 focus, context는 같은 problem_evidence의 원문에서 그대로 추출한 구절이다. phenomenon/design_goal의 context는 subject·focus와 구별되는 구체적 상황/맥락의 구절이며 비울 수 없다. 관계 자체가 구별되는 relationship은 context를 비울 수 있다. 일반적인 대상과 기능의 나열만 있고 맥락이나 문제가 드러나지 않으면 none이다. event_id는 그 인용의 사용자 입력이며 event_id도 그 사용자 입력이다. subject는 연구할 대상/시스템, focus는 관찰할 현상/작동/설계 목적의 구별되는 내용이다. 일반 관심사나 '어떻게 주제를 정할지 모르겠어' 같은 도움 요청, 카드의 제목·설명만으로는 kind=none, 나머지는 빈 문자열/0으로 둔다. 분야 이름만 다른 넓은 관심을 연구 문제로 꾸미지 않는다. 문제 인용에는 대조 앞의 부정한 내용보다 현재 다루려는 긍정적 구절을 제공한다.
+focus_update는 같은 주제 안에서의 관점 변화이며 topic_relation과 별개다. operation은 none/add/refine/replace/compare/branch. previous_focus와 current_focus는 관찰된 발화의 정확한 부분 구절이며 current_focus는 최신 user_input의 인용 안에 있어야 한다. evidence_quotes는 그 최신 입력만 참조한다. 카드 클릭은 이 필드로 바꾸지 않는다. 관심이 정정되면 replace로 두고, 무엇에서 무엇으로 관심을 옮기는지 분리한다. 단순 대안 요청은 branch이며 replace가 아니다. 정정의 반영은 어려움 판정을 요구하지 않는다.
+예: '사용자의 이해도만 반영하는거 아니야? 모호한 표현에 대한 LLM의 사용자 의도 파악이 궁금해'에서는 previous_focus='사용자의 이해도', current_focus='모호한 표현에 대한 LLM의 사용자 의도 파악'이다. 사용자 이해도는 현재도 유지할 관점으로 다시 나열하지 않는다. 도메인 맥락이 남아 있으면 주제 전체 변경 대신 같은 맥락의 관점 정정으로 해석할 수 있다. 수정 전 내용은 현재 관심이 아니라 이전 이력이다.
+최근 관심은 current_direction에 짧게 표현한다. 이전에 거친 관점·기술을 전부 연결한 긴 문장으로 만들지 않는다. 좁혀 검토한 후보, 명시적으로 표현한 연구 문제, 최종 채택은 구별한다.
