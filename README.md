@@ -482,7 +482,7 @@ Gemini·검색 처리 오류는 로컬 API에서 HTTP 502로 전달할 수 있�
 | 변수 | 기본값 | 설명 |
 | --- | --- | --- |
 | `GEMINI_API_KEY` | 빈 값 | 실제 Gemini 호출 키 |
-| `GEMINI_MODEL` | `gemini-3.1-flash-lite` | 현재 코드의 기본 모델 |
+| `GEMINI_MODEL` | `gemini-3.5-flash-lite` | 현재 코드의 기본 모델 |
 | `GEMINI_API_STYLE` | `generate_content` | 기본 `generateContent` 연결 방식; `interactions` 분기도 코드에 존재 |
 | `GEMINI_THINKING_LEVEL` | Flash Lite 기본 `minimal` | 모델 호출의 thinking 설정 |
 | `GEMINI_TIMEOUT_SECONDS` | `300` | 개별 모델 호출의 응답 대기 시간 |

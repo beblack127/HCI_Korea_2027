@@ -28,7 +28,7 @@ class Settings:
         self.root = ROOT
         self.data_dir = os.getenv("DATA_DIR") or (ROOT / "data")
         self.api_key = os.getenv("GEMINI_API_KEY", "").strip()
-        self.model = os.getenv("GEMINI_MODEL", "gemini-3.1-flash-lite")
+        self.model = os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite")
         self.base_url = "https://generativelanguage.googleapis.com/v1"
         self.api_style = os.getenv("GEMINI_API_STYLE", "generate_content")
         self.thinking_level = os.getenv("GEMINI_THINKING_LEVEL", "minimal" if "flash-lite" in self.model else "low")

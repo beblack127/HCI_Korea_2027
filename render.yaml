@@ -2,7 +2,7 @@ envVarGroups:
   - name: hci-korea-study-ai-settings
     envVars:
       - key: GEMINI_MODEL
-        value: gemini-3.1-flash-lite
+        value: gemini-3.5-flash-lite
       - key: GEMINI_API_STYLE
         value: generate_content
       - key: GEMINI_THINKING_LEVEL
