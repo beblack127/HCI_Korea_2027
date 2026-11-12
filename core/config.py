@@ -26,7 +26,7 @@ load_env(ROOT / ".env")
 class Settings:
     def __init__(self, **overrides):
         self.root = ROOT
-        self.data_dir = ROOT / "data"
+        self.data_dir = os.getenv("DATA_DIR") or (ROOT / "data")
         self.api_key = os.getenv("GEMINI_API_KEY", "").strip()
         self.model = os.getenv("GEMINI_MODEL", "gemini-3.1-flash-lite")
         self.base_url = "https://generativelanguage.googleapis.com/v1"
@@ -40,4 +40,6 @@ class Settings:
         for key, value in overrides.items():
             setattr(self, key, value)
         self.data_dir = Path(self.data_dir)
+        if not self.data_dir.is_absolute():
+            self.data_dir = ROOT / self.data_dir
         self.live = self.mode != "preview" and bool(self.api_key)

@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>스터디 접속</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='study_login.css') }}">
+</head>
+<body>
+  <main>
+    <h1>연구 탐색 사용자 스터디</h1>
+    <p>참여 안내에 적힌 접속 코드를 입력해 주세요.</p>
+    {% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
+    <form method="post" action="/study-login">
+      <label for="access_code">접속 코드</label>
+      <input id="access_code" name="access_code" type="password" autocomplete="current-password" required autofocus>
+      <button type="submit">계속</button>
+    </form>
+  </main>
+</body>
+</html>

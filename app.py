@@ -1,10 +1,11 @@
-"""Research-topic exploration workspace. Local-only, session-separated prototype."""
+"""Research-topic exploration workspace with session-separated storage."""
 import json
+import hmac
 import logging
 import os
 import secrets
 from datetime import timedelta
-from flask import Flask, jsonify, render_template, request, session, Response
+from flask import Flask, jsonify, redirect, render_template, request, session, Response
 from core.config import Settings
 from core.storage import Store
 from core.service import Workspace
@@ -26,6 +27,7 @@ def create_app(settings=None):
     app.secret_key = secret_path.read_text().strip()
     app.config.update(MAX_CONTENT_LENGTH=2 * 1024 * 1024, SESSION_COOKIE_HTTPONLY=True,
                       SESSION_COOKIE_SAMESITE="Strict", SESSION_COOKIE_NAME="research_exploration_1109",
+                      SESSION_COOKIE_SECURE=os.getenv("SESSION_COOKIE_SECURE", "false").lower() == "true",
                       PERMANENT_SESSION_LIFETIME=timedelta(days=30))
     workspace = Workspace(settings, store)
     app.extensions.update(workspace=workspace, store=store, settings=settings)
@@ -37,6 +39,26 @@ def create_app(settings=None):
             session["workspace_id"] = value
             session.permanent = True
         return value
+
+    @app.before_request
+    def study_access_gate():
+        access_code = os.getenv("STUDY_ACCESS_CODE", "").strip()
+        if not access_code or session.get("study_access") or request.endpoint == "static":
+            return None
+        if request.path in {"/study-login", "/api/status"}:
+            return None
+        if request.path.startswith("/api/"):
+            return jsonify(error="스터디 접속 코드를 입력해 주세요."), 401
+        return render_template("study_login.html", error=None), 401
+
+    @app.post("/study-login")
+    def study_login():
+        expected = os.getenv("STUDY_ACCESS_CODE", "").strip()
+        submitted = request.form.get("access_code", "")
+        if expected and hmac.compare_digest(submitted, expected):
+            session["study_access"] = True
+            return redirect("/")
+        return render_template("study_login.html", error="접속 코드를 다시 확인해 주세요."), 401
 
     @app.before_request
     def local_api():

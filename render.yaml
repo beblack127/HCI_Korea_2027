@@ -1,0 +1,70 @@
+envVarGroups:
+  - name: hci-korea-study-ai-settings
+    envVars:
+      - key: GEMINI_MODEL
+        value: gemini-3.1-flash-lite
+      - key: GEMINI_API_STYLE
+        value: generate_content
+      - key: GEMINI_THINKING_LEVEL
+        value: minimal
+      - key: GEMINI_TIMEOUT_SECONDS
+        value: "300"
+      - key: APP_MODE
+        value: auto
+
+services:
+  - type: web
+    name: hci-korea-sense-study
+    runtime: python
+    rootDir: .
+    plan: 0.1c-256mb
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn --bind 0.0.0.0:$PORT --workers 1 --threads 4 --timeout 360 wsgi:app
+    healthCheckPath: /api/status
+    autoDeployTrigger: off
+    disk:
+      name: sense-study-data
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - fromGroup: hci-korea-study-ai-settings
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: OPENALEX_API_KEY
+        sync: false
+      - key: STUDY_ACCESS_CODE
+        sync: false
+      - key: DATA_DIR
+        value: /var/data
+      - key: SESSION_COOKIE_SECURE
+        value: "true"
+
+  - type: web
+    name: hci-korea-baseline-study
+    runtime: python
+    rootDir: baseline
+    plan: 0.1c-256mb
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn --bind 0.0.0.0:$PORT --workers 1 --threads 4 --timeout 360 wsgi:app
+    healthCheckPath: /api/status
+    autoDeployTrigger: off
+    disk:
+      name: baseline-study-data
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - fromGroup: hci-korea-study-ai-settings
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: OPENALEX_API_KEY
+        sync: false
+      - key: STUDY_ACCESS_CODE
+        sync: false
+      - key: DATA_DIR
+        value: /var/data
+      - key: SESSION_COOKIE_SECURE
+        value: "true"
+      - key: CONDITION
+        value: baseline
+      - key: SHADOW_ESTIMATE
+        value: sync

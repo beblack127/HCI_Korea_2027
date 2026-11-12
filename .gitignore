@@ -16,6 +16,9 @@ node_modules/
 .installation-manifest.json
 data/*
 !data/.gitkeep
+**/data/*
+**/data_baseline/*
+**/.session-secret
 exports/
 exploration-*.json
 docs/*DIAGNOSIS*.json
