@@ -5,6 +5,7 @@ import logging
 import os
 import secrets
 from datetime import timedelta
+from urllib.parse import urlsplit
 from flask import Flask, jsonify, redirect, render_template, request, session, Response
 from core.config import Settings
 from core.storage import Store
@@ -67,8 +68,15 @@ def create_app(settings=None):
             if not request.is_json or request.headers.get("X-Workspace-Request") != "1":
                 return jsonify(error="올바른 앱 요청이 아닙니다."), 400
             origin = request.headers.get("Origin")
-            if origin and origin.rstrip("/") != request.host_url.rstrip("/"):
-                return jsonify(error="다른 출처의 요청은 허용하지 않습니다."), 403
+            if origin:
+                parsed_origin = urlsplit(origin)
+                forwarded_proto = request.headers.get("X-Forwarded-Proto", "").split(",", 1)[0].strip().lower()
+                forwarded_host = request.headers.get("X-Forwarded-Host", "").split(",", 1)[0].strip()
+                expected_scheme = forwarded_proto if forwarded_proto in {"http", "https"} else request.scheme
+                expected_host = forwarded_host or request.host
+                if (parsed_origin.scheme.lower() != expected_scheme
+                        or parsed_origin.netloc.lower() != expected_host.lower()):
+                    return jsonify(error="다른 출처의 요청은 허용하지 않습니다."), 403
 
     @app.after_request
     def headers(response):
