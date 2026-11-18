@@ -22,7 +22,7 @@ from core.config import Settings, load_env
 from core.difficulty import concept_question, negative_experience
 from core.llm import GeminiClient
 from core.presentation import enrich_state
-from core.state import OBSERVATIONS, empty_state, validate_state
+from core.state import OBSERVATIONS, empty_state, validate_state, grounded_difficulty_target, valid_ids, quoted_evidence
 
 
 def read_rows(db_path):
@@ -74,7 +74,59 @@ def summarize_state(state, warnings, latest_id):
     }
 
 
+def proposal_diagnostics(raw, events, prior, trace):
+    """Keep types, evidence IDs and warning codes; never output participant text."""
+    result = []
+    for proposal in raw.get("difficulties") or []:
+        if not isinstance(proposal, dict):
+            continue
+        allowed = {e["id"]: e for e in events if e["type"] in OBSERVATIONS}
+        ids = valid_ids(proposal.get("evidence_ids"), allowed)
+        refs = quoted_evidence(proposal.get("evidence_quotes"), allowed)
+        isolated = dict(raw, difficulties=[proposal])
+        state, warnings = validate_state(isolated, events, prior, trace=trace)
+        result.append({"proposed_type": proposal.get("type"),
+                       "proposed_status": proposal.get("status"),
+                       "evidence_ids": proposal.get("evidence_ids", []),
+                       "valid_evidence_count": len(set(ids)),
+                       "target_grounded": bool(grounded_difficulty_target(proposal.get("target"), ids, allowed)),
+                       "has_negative_experience_quote": any(negative_experience(ref["quote"]) for ref in refs),
+                       "has_inference_reason": len(str(proposal.get("reason") or "").strip()) >= 12,
+                       "validated_types": [d["type"] for d in state["difficulties"]],
+                       "validated_statuses": [d["status"] for d in state["difficulties"]],
+                       "validation_warnings": warnings})
+    return result
+
+
+def audit_saved(args):
+    """Revalidate original stored model proposals with zero API calls or DB writes."""
+    db_path = Path(args.db).expanduser().resolve()
+    sessions = read_rows(db_path)[:args.sessions]
+    con = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    con.row_factory = sqlite3.Row
+    try:
+        for sidx, session in enumerate(sessions, 1):
+            rows = con.execute("SELECT through_event_id,state,provenance FROM estimates WHERE session_id=? ORDER BY through_event_id,id", (session["id"],)).fetchall()
+            for row in rows:
+                provenance = json.loads(row["provenance"])
+                raw = provenance.get("raw_estimate") or {}
+                if not raw.get("difficulties"):
+                    continue
+                end = row["through_event_id"]
+                trace = [e for e in session["events"] if e["id"] <= end]
+                events = [e for e in trace if e["type"] in OBSERVATIONS]
+                prior = old_state_at(session["estimates"], end - 1)
+                print(json.dumps({"session": f"S{sidx:02d}", "through_event_id": end,
+                    "original_validation_warnings": provenance.get("validation_warnings", []),
+                    "original_validated_types": [d["type"] for d in json.loads(row["state"]).get("difficulties", [])],
+                    "current_diagnostics": proposal_diagnostics(raw, events, prior, trace)}, ensure_ascii=False))
+    finally:
+        con.close()
+
+
 def run(args):
+    if args.saved_only:
+        return audit_saved(args)
     if args.env_file:
         load_env(Path(args.env_file).expanduser().resolve())
     settings = Settings()
@@ -147,7 +199,9 @@ def run(args):
             current = summarize_state(state, warnings, target["id"])
             old = summarize_state(old_state_at(session["estimates"], target["id"]), [], target["id"])
             cases.append({"session": f"S{sidx:02d}", "turn": input_ord[target["id"]],
-                          "category": category, "old": old, "new": current, "replay": "ok"})
+                          "category": category, "old": old, "new": current, "replay": "ok",
+                          "proposal_diagnostics": proposal_diagnostics(raw, selected, prior, trace),
+                          "validation_warnings": warnings})
             previous = state
             if args.delay:
                 time.sleep(args.delay)
@@ -176,6 +230,7 @@ def run(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--saved-only", action="store_true", help="Print quote-free validation of saved proposals; no API calls or report file.")
     parser.add_argument("--db", default=str(ROOT / "data" / "workspace.sqlite3"))
     parser.add_argument("--env-file", default=str(ROOT / ".env"))
     parser.add_argument("--sessions", type=int, default=11)

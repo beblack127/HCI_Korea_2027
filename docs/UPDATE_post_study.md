@@ -25,3 +25,13 @@ Report: `/private/tmp/sense_difficulty_replay.json` (local only; no utterance te
 - Full Python suite: 155 tests passed with `STUDY_ACCESS_CODE` unset for the test process. The local study-code gate otherwise returns `401` before the tests reach the API, so leave the real participant configuration unchanged.
 - Frontend suite: 33 tests passed. Python compilation and `git diff --check` passed.
 - This retrospective replay compares model output on historical input; it does not establish how participants would have reacted to the revised system.
+
+## Saved proposal audit and correction (11.18-v2)
+
+The original study database preserves `provenance.raw_estimate` and `validation_warnings`. The earlier replay report retained only validated results, so its empty difficulty lists did not show rejected model proposals. The saved originals contain six proposals: selection (1), formulation (2), connection (1), and concept (2). All six originally failed `difficulty_without_supported_meaning`.
+
+`python3 scripts/replay_difficulty.py --saved-only` audits the saved proposals without API calls, database writes, or output files. It prints proposed types, evidence counts, grounding checks, validation codes, and validated types without participant text. Future live replays also retain these diagnostics. Individual diagnostics isolate one proposal but still apply the normal validator, including deterministic support signals.
+
+Revalidation under 11.18-v2 accepts the one unfamiliar-vocabulary case as concept/possible. A single directly stated unfamiliarity can signal concept-support need without implying distress. Negations, hypothetical unfamiliarity, and other people's states are excluded. A reported departure from the intended topic is recognized as a correction request. Four ordinary comparison, constraint, detail, and research-goal requests remain unclassified as difficulty. The connection proposal's target did not map to the cited user text; it remains rejected as cognitive difficulty, while the input triggers response correction.
+
+This is deterministic revalidation of the same saved proposals, not a fresh Gemini run or evidence of participant outcomes. Python 157 and frontend 33 tests passed.

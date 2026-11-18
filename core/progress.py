@@ -63,7 +63,7 @@ def correction_request(value):
     # A request to repair recommendations, independent of a difficulty judgement.
     if alternative_request(value):
         return False
-    return bool(re.search(r"(?:말고|아니라|아닌|대신|보다는)|(?:추천|후보|주제|설명).{0,40}(?:아니야|아닌가|달라|다르|잘못|빗나|맞지|맞는.*아니)|(?:내가|제가).{0,15}(?:궁금한|원하는|말한).{0,10}(?:건|것은)", value))
+    return bool(re.search(r"(?:말고|아니라|아닌|대신|보다는)|(?:벗어났|벗어난\s*것\s*같)|(?:추천|후보|주제|설명).{0,40}(?:아니야|아닌가|달라|다르|잘못|빗나|맞지|맞는.*아니)|(?:내가|제가).{0,15}(?:궁금한|원하는|말한).{0,10}(?:건|것은)", value))
 
 
 def _keys(value):

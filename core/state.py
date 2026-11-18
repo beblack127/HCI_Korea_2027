@@ -3,7 +3,7 @@ import copy
 import hashlib
 import re
 from .behavior import behavior_signals, support_bundles, support_issues, request_type, topic_steps, normalized
-from .difficulty import LABELS as DIFFICULTY_LABELS, negative_experience, difficulty_kind, guess_kind, technical_connection, concept_question, pending_difficulties
+from .difficulty import LABELS as DIFFICULTY_LABELS, negative_experience, difficulty_kind, guess_kind, technical_connection, concept_question, unfamiliar_concept, pending_difficulties
 from .progress import validated_focus_update, correction_request, grounded_span, alternative_request
 
 OBSERVATIONS = {"user_input", "topic_select", "topic_browse", "topic_refine", "paper_search_submit",
@@ -386,7 +386,7 @@ def validate_state(raw, events, previous=None, trace=None):
         candidates.append({"type": guess_kind(content), "status": "expressed", "evidence_ids": [latest_id],
                            "evidence_quotes": [{"event_id": latest_id, "quote": content}]})
     # A direct concept question is a support signal, not proof of frustration or failure.
-    if content and concept_question(content) and not any(
+    if content and (concept_question(content) or unfamiliar_concept(content)) and not any(
             isinstance(d, dict) and "concept" == d.get("type") and latest_id in valid_ids(d.get("evidence_ids"), allowed)
             for d in candidates):
         candidates.append({"type": "concept", "status": "possible", "evidence_ids": [latest_id],
@@ -407,7 +407,8 @@ def validate_state(raw, events, previous=None, trace=None):
                   and negative_experience(allowed[r["event_id"]]["payload"].get("text", ""))]
         question_signal = (kind == "concept" and latest_id in ids
                            and allowed[latest_id]["type"] == "user_input"
-                           and concept_question(allowed[latest_id]["payload"].get("text", "")))
+                           and (concept_question(allowed[latest_id]["payload"].get("text", ""))
+                                or unfamiliar_concept(allowed[latest_id]["payload"].get("text", ""))))
         if direct:
             if latest_id not in {ref["event_id"] for ref in direct}:
                 warnings.append("difficulty_reused_old_evidence")
@@ -468,7 +469,12 @@ def validate_state(raw, events, previous=None, trace=None):
                 "evidence_ids": ids, "evidence_quotes": direct,
                 "source": source,
                 "signals": bundles[kind]["signals"] if status == "possible" and kind in bundles else []}
-        if question_signal:
+        if question_signal and unfamiliar_concept(content):
+            item["source"] = "vocabulary"
+            item["inference_reason"] = "사용자가 어휘·개념의 생소함을 밝혀 친숙한 설명 지원이 필요할 수 있음"
+            item["description"] = "어휘·개념이 생소하다는 표현이 있어 친숙한 설명 지원이 필요할 수 있어요."
+            item["evidence_quotes"] = quotes
+        elif question_signal:
             item["description"] = "개념을 묻는 질문이 있어 설명 지원이 필요할 수 있어요. 어려움을 느낀다고 단정하지는 않아요."
             item["evidence_quotes"] = quotes
         if existing:

@@ -73,6 +73,26 @@ class DifficultyMeaningTests(unittest.TestCase):
         self.assertEqual(st["difficulties"][0]["evidence_quotes"][0]["quote"], value)
         self.assertIn("단정하지는 않아요", st["difficulties"][0]["description"])
 
+    def test_unfamiliar_vocabulary_is_possible_but_not_general_information_request(self):
+        value = "용어가 생소한데 더 친숙하게 설명해줘"
+        st, _ = validate_state(empty_state(), [ev(1, "user_input", text=value)])
+        self.assertEqual(st["difficulty_status"], "possible")
+        self.assertEqual(st["difficulties"][0]["source"], "vocabulary")
+        self.assertEqual(select_support(st)["mode"], "concept")
+        for value in ["용어가 생소하지 않아", "어휘가 생소한 건 아니야", "용어가 생소하면 어떻게 해?",
+                      "용어를 자세히 설명해줘", "학습자가 용어를 생소하게 느끼는 상황을 연구하고 싶어"]:
+            with self.subTest(value=value):
+                st, _ = validate_state(empty_state(), [ev(1, "user_input", text=value)])
+                self.assertEqual(st["difficulties"], [])
+
+    def test_reported_topic_drift_is_a_correction_without_cognitive_difficulty(self):
+        from core.progress import correction_request
+        value = "추천이 원래 비교에서 또 벗어났는데"
+        self.assertTrue(correction_request(value))
+        st, _ = validate_state(empty_state(), [ev(1, "user_input", text=value)])
+        self.assertTrue(st["correction_requested"])
+        self.assertEqual(st["difficulties"], [])
+
     def test_requests_negations_hypotheticals_and_other_people_are_not_experiences(self):
         for value in ["후보를 비교해줘", "다른 주제는 없어?", "어려운 개념을 설명해줘", "개념을 설명해줘",
                       "헷갈리지 않아", "모르겠다는 건 아니야", "빙빙 도는 건 아니야", "막막하면 어떻게 해?",

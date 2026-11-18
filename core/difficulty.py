@@ -40,6 +40,14 @@ def concept_question(value):
         r"(?:뭐가\s*(?:있|좋)|무엇을\s*(?:할|연구)|어떤\s*(?:주제|방향|후보))", text))
 
 
+def unfamiliar_concept(value):
+    """Current first-person unfamiliar vocabulary is a possible support need."""
+    content = str(value or "").strip()
+    if re.search(r"생소.{0,12}(?:않|아니)|낯설.{0,12}(?:않|아니)|생소하면|생소한지|낯설면|(?:사용자|학습자|사람들).{0,20}(?:생소|낯설)", content):
+        return False
+    return bool(re.search(r"(?:어휘|용어|개념|단어|설명).{0,16}(?:생소|낯설)|(?:생소|낯선).{0,8}(?:어휘|용어|개념|단어)", content))
+
+
 def difficulty_kind(proposed, value):
     if technical_connection(value):
         return "concept"
