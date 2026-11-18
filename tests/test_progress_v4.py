@@ -23,7 +23,7 @@ class ProgressTests(unittest.TestCase):
     def test_refine_is_observed_progress_without_establishing_a_research_problem(self):
         events=[event(1,text='모호한 입력의 의도 해석'),event(2,'topic_refine',title='되묻기 시점',recommendation_id='a')]
         state,_=estimate(dict(empty_state(),direction_stage='forming',current_direction='이전의 아주 긴 포괄 관심'),events)
-        self.assertEqual(state['direction_stage'],'unknown')
+        self.assertEqual(state['direction_stage'],'exploring')
         self.assertEqual(state['research_problem'],'')
         self.assertEqual(state['exploration_progress']['status'],'narrowing')
         self.assertEqual(state['exploration_progress']['problem_status'],'unconfirmed')

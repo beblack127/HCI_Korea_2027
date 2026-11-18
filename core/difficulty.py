@@ -30,6 +30,16 @@ def technical_connection(value):
     return not personal_connection(value) and bool(re.search(technical, value)) and bool(re.search(relation, value))
 
 
+def concept_question(value):
+    """A definition/explanation question can signal concept-support need without proving distress."""
+    text = str(value or "").strip()
+    asks_definition = bool(re.search(
+        r"(?:[가-힣A-Za-z0-9_-]+(?:이|가|은|는)\s*(?:뭐야|뭐예요|무엇(?:이야|인가요)?)|"
+        r"[가-힣A-Za-z0-9_-]+의\s*(?:뜻|의미)(?:이|가)?\s*(?:뭐야|뭐예요|뭐지|무엇))", text, re.I))
+    return asks_definition and not bool(re.search(
+        r"(?:뭐가\s*(?:있|좋)|무엇을\s*(?:할|연구)|어떤\s*(?:주제|방향|후보))", text))
+
+
 def difficulty_kind(proposed, value):
     if technical_connection(value):
         return "concept"

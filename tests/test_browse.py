@@ -5,7 +5,7 @@ import unittest
 from unittest.mock import Mock
 
 from app import create_app
-from core.browse import browse_response_issues
+from core.browse import browse_response_issues, completed_response_issues
 from core.config import Settings
 from core.llm import ModelError
 from core.policy import select_support
@@ -66,6 +66,20 @@ class BrowseChecksTests(unittest.TestCase):
         broken = copy.deepcopy(NEW)
         broken[0]["search_query"] = ""
         self.assertIn("missing_candidate_details", browse_response_issues(reply(broken), OLD))
+
+    def test_repetition_is_detected_against_any_candidate_batch_in_direction_context(self):
+        response = reply(OLD)
+        self.assertIn("repeated_candidate_set", completed_response_issues(
+            response, NEW, "directions", history=[OLD, NEW]))
+
+    def test_concept_detail_response_is_bounded_to_900_characters(self):
+        response = clean_response({"assistance": {"title": "개념 설명", "body": "가나다." * 300},
+            "recommendations": NEW, "next_step": "현재 개념을 살펴보세요.",
+            "next_step_reason": "질문한 내용을 이해하는 데 도움이 됩니다."}, [],
+            {"mode": "concept", "detail_requested": False, "recommendation_count": 3,
+             "assistance_required": True})
+        self.assertLessEqual(len(response["assistance"]["details"]), 900)
+        self.assertTrue(response["assistance"]["expanded"])
 
 
 class BrowsePipelineTests(unittest.TestCase):

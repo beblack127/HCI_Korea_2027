@@ -3,7 +3,7 @@ import copy
 import hashlib
 import re
 from .behavior import behavior_signals, support_bundles, support_issues, request_type, topic_steps, normalized
-from .difficulty import LABELS as DIFFICULTY_LABELS, negative_experience, difficulty_kind, guess_kind, technical_connection, pending_difficulties
+from .difficulty import LABELS as DIFFICULTY_LABELS, negative_experience, difficulty_kind, guess_kind, technical_connection, concept_question, pending_difficulties
 from .progress import validated_focus_update, correction_request, grounded_span, alternative_request
 
 OBSERVATIONS = {"user_input", "topic_select", "topic_browse", "topic_refine", "paper_search_submit",
@@ -18,6 +18,7 @@ def empty_state():
     return {"direction_stage": "unknown", "direction_confidence": "low", "trajectory_assessment": {
                 "status": "uncertain", "confidence": "low", "reason": "", "evidence_ids": []},
             "current_direction": "", "research_problem": "",
+            "initial_interest": "", "initial_interest_evidence_id": 0, "request_intent": "continue",
             "problem_evidence_ids": [], "problem_evidence": [],
             "summary": "아직 탐색 상태를 판단할 정보가 충분하지 않습니다.", "recent_change": "",
             "difficulty_status": "unknown", "difficulties": [], "difficulty_history": [], "pending_difficulties": [], "support_issues": [], "evidence": [],
@@ -132,6 +133,14 @@ def _request_kind(content):
     return "directions"
 
 
+def _interaction_intent(content):
+    if re.search(r"(?:지금까지|현재까지|이s*세션|이s*대화|탐색s*내용|탐색s*과정).{0,24}(?:정리|요약)|(?:정리|요약).{0,12}(?:해줘|해s*주|부탁|해볼까)", content):
+        return "synthesis"
+    if re.search(r"(?:다른|새로운|새)s*(?:주제|방향|후보)|(?:주제|방향|후보).{0,12}(?:다른|더|추천|제안)|처음부터.{0,10}추천", content):
+        return "new_direction"
+    return "continue"
+
+
 def _new_directions(content):
     return bool(re.search(r"(?:다른|새로운|다음).{0,12}(?:주제|방향|후보|키워드)|(?:주제|방향|후보|키워드).{0,12}(?:추천|제안|없어)|어떤\s*연구|무슨\s*연구|연구.{0,10}할\s*수|research\s+(?:topics?|directions?)", content, re.I))
 
@@ -189,6 +198,16 @@ def validate_state(raw, events, previous=None, trace=None):
     latest = next((e for e in reversed(events) if e["type"] in {"user_input", "topic_browse", "topic_refine"}), None)
     latest_id = latest["id"] if latest else 0
     content = latest["payload"].get("text", "") if latest and latest["type"] == "user_input" else ""
+    initial = (previous or {}).get("initial_interest")
+    initial_event_id = (previous or {}).get("initial_interest_evidence_id", 0)
+    if not initial:
+        initial_event = next((e for e in events if e["type"] == "user_input"), None)
+        if initial_event:
+            initial = text(initial_event["payload"].get("text"), 180)
+            initial_event_id = initial_event["id"]
+    state["initial_interest"], state["initial_interest_evidence_id"] = initial or "", initial_event_id or 0
+    if latest and latest["type"] == "user_input":
+        state["request_intent"] = _interaction_intent(content)
     state["commitment_requested"] = bool(re.search(r"확정해|최종.{0,8}결정|결정해\s*줘|정해\s*줘", content))
     state["detail_requested"] = bool(re.search(r"자세히|자세하게|상세히|상세하게|꼼꼼히|단계별로", content))
     state["direction_stage"] = raw.get("direction_stage") if raw.get("direction_stage") in STAGE_LABELS else "unknown"
@@ -366,6 +385,12 @@ def validate_state(raw, events, previous=None, trace=None):
             for r in quoted_evidence(d.get("evidence_quotes"), allowed) if r["event_id"] == latest_id):
         candidates.append({"type": guess_kind(content), "status": "expressed", "evidence_ids": [latest_id],
                            "evidence_quotes": [{"event_id": latest_id, "quote": content}]})
+    # A direct concept question is a support signal, not proof of frustration or failure.
+    if content and concept_question(content) and not any(
+            isinstance(d, dict) and "concept" == d.get("type") and latest_id in valid_ids(d.get("evidence_ids"), allowed)
+            for d in candidates):
+        candidates.append({"type": "concept", "status": "possible", "evidence_ids": [latest_id],
+                           "target": content, "reason": "개념의 뜻을 묻는 질문이 있어 해당 개념의 설명 지원이 필요할 수 있음"})
     for kind, bundle in bundles.items():
         candidates.append({"type": kind, "status": "possible", "evidence_ids": bundle["event_ids"], "evidence_quotes": []})
     for d in candidates:
@@ -380,6 +405,9 @@ def validate_state(raw, events, previous=None, trace=None):
         quotes = quoted_evidence(d.get("evidence_quotes"), allowed)
         direct = [r for r in quotes if r["event_id"] in ids and negative_experience(r["quote"])
                   and negative_experience(allowed[r["event_id"]]["payload"].get("text", ""))]
+        question_signal = (kind == "concept" and latest_id in ids
+                           and allowed[latest_id]["type"] == "user_input"
+                           and concept_question(allowed[latest_id]["payload"].get("text", "")))
         if direct:
             if latest_id not in {ref["event_id"] for ref in direct}:
                 warnings.append("difficulty_reused_old_evidence")
@@ -389,6 +417,13 @@ def validate_state(raw, events, previous=None, trace=None):
             kind = difficulty_kind(kind, direct[0]["quote"])
             if kind != original_kind:
                 warnings.append("difficulty_type_reinterpreted")
+        elif question_signal and d.get("status") in {"possible", "expressed"}:
+            # Do not convert an information question into an expressed emotional difficulty.
+            status = "possible"
+            quotes = [{"event_id": latest_id, "quote": allowed[latest_id]["payload"].get("text", "")}]
+            target = target or text(d.get("target")) or quotes[0]["quote"][:100]
+            if len(text(d.get("reason"), 240)) < 12:
+                d["reason"] = "개념의 뜻을 묻는 질문이 있어 해당 개념의 설명 지원이 필요할 수 있음"
         elif (d.get("status") == "possible" and latest_id in ids and len(set(ids)) >= 2 and target
               and len(text(d.get("reason"), 240)) >= 12):
             status = "possible"
@@ -426,12 +461,16 @@ def validate_state(raw, events, previous=None, trace=None):
         description = (("탐색에서 어려움을 표현했어요. 어떤 유형인지는 아직 판단하지 않았어요." if kind == "unspecified"
                         else f"{DIFFICULTY_LABELS[kind]}의 어려움을 표현했어요.") if status == "expressed"
                        else f"발화와 세션 내 행동에서 {DIFFICULTY_LABELS[kind]} 지원이 필요할 가능성이 보여요.")
+        source = "utterance" if status == "expressed" else "question" if question_signal else "behavior"
         item = {"type": kind, "status": status, "description": description,
                 "target": target, "inference_reason": text(d.get("reason"), 240),
                 "confidence": "high" if status == "expressed" else "medium",
                 "evidence_ids": ids, "evidence_quotes": direct,
-                "source": "utterance" if status == "expressed" else "behavior",
+                "source": source,
                 "signals": bundles[kind]["signals"] if status == "possible" and kind in bundles else []}
+        if question_signal:
+            item["description"] = "개념을 묻는 질문이 있어 설명 지원이 필요할 수 있어요. 어려움을 느낀다고 단정하지는 않아요."
+            item["evidence_quotes"] = quotes
         if existing:
             if existing.get("type") != kind:
                 existing.setdefault("original_type", existing["type"])
@@ -534,9 +573,14 @@ def preview_state(events, previous=None):
     raw["current_direction"] = text(actions[-1]["payload"].get("title") if actions else speech[0]["payload"].get("text"), 180)
     raw["direction_stage"] = "exploring"
     raw["support_request"] = _request_kind(content)
+    raw["request_intent"] = _interaction_intent(content)
     raw["support_request_evidence_ids"] = [last["id"]] if content else []
     raw["evidence"] = [{"event_id": last["id"], "interpretation": "현재 입력과 선택을 탐색 맥락으로 기록했습니다."}]
     if content and negative_experience(content):
         raw["difficulties"].append({"type": guess_kind(content), "status": "expressed",
                                     "evidence_ids": [last["id"]], "evidence_quotes": [{"event_id": last["id"], "quote": content}]})
+    elif content and concept_question(content):
+        raw["difficulties"].append({"type": "concept", "status": "possible", "target": content,
+                                    "reason": "개념의 뜻을 묻는 질문이 있어 해당 개념의 설명 지원이 필요할 수 있음",
+                                    "evidence_ids": [last["id"]]})
     return validate_state(raw, events, previous)[0]

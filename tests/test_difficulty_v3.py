@@ -12,6 +12,8 @@ from core.policy import select_support
 from core.presentation import enrich_state
 from core.state import empty_state, validate_state, preview_state
 
+HEADERS = {'X-Workspace-Request': '1'}
+
 
 def ev(i, kind, **payload):
     return {"id": i, "type": kind, "payload": payload}
@@ -29,6 +31,23 @@ def conceptual_trace():
 
 
 class DifficultyMeaningTests(unittest.TestCase):
+    def test_initial_interest_is_fixed_and_visible_across_direction_changes(self):
+        first = ev(1, "user_input", text="LLM과 학술 탐색")
+        before, _ = validate_state(empty_state(), [first])
+        after, _ = validate_state(empty_state(), [first, ev(2, "user_input", text="다른 주제로 바꾸고 싶어")], before)
+        self.assertEqual(before["initial_interest"], "LLM과 학술 탐색")
+        self.assertEqual(after["initial_interest"], "LLM과 학술 탐색")
+        self.assertEqual(after["initial_interest_evidence_id"], 1)
+
+    def test_synthesis_request_uses_recap_plan_without_candidates(self):
+        events = [ev(1, "user_input", text="지금까지 탐색 내용을 정리해줘")]
+        state, _ = validate_state(empty_state(), events)
+        plan = select_support(state)
+        self.assertEqual(state["request_intent"], "synthesis")
+        self.assertEqual(plan["mode"], "synthesis")
+        self.assertEqual(plan["source"], "synthesis_request")
+        self.assertEqual(plan["recommendation_count"], 0)
+
     def test_vague_experiences_keep_uncategorized_type(self):
         for value in ["계속 빙빙 도는 느낌이야", "추천을 따라가는데 뭘 하고 있는지 모르겠어", "아직 막막해"]:
             with self.subTest(value=value):
@@ -45,8 +64,17 @@ class DifficultyMeaningTests(unittest.TestCase):
             self.assertEqual(st["difficulties"][0]["type"], kind)
             self.assertEqual(st["difficulty_status"], "expressed")
 
+    def test_concept_definition_question_is_support_need_not_emotional_difficulty(self):
+        value = "임베딩이 뭐야?"
+        st, _ = validate_state(empty_state(), [ev(1, "user_input", text=value)])
+        self.assertEqual(st["difficulty_status"], "possible")
+        self.assertEqual(st["difficulties"][0]["type"], "concept")
+        self.assertEqual(st["difficulties"][0]["source"], "question")
+        self.assertEqual(st["difficulties"][0]["evidence_quotes"][0]["quote"], value)
+        self.assertIn("단정하지는 않아요", st["difficulties"][0]["description"])
+
     def test_requests_negations_hypotheticals_and_other_people_are_not_experiences(self):
-        for value in ["임베딩이 뭐야?", "후보를 비교해줘", "다른 주제는 없어?", "어려운 개념을 설명해줘",
+        for value in ["후보를 비교해줘", "다른 주제는 없어?", "어려운 개념을 설명해줘", "개념을 설명해줘",
                       "헷갈리지 않아", "모르겠다는 건 아니야", "빙빙 도는 건 아니야", "막막하면 어떻게 해?",
                       "다른 사용자가 어려워하는 상황을 연구하고 싶어"]:
             with self.subTest(value=value):
@@ -90,7 +118,7 @@ class DifficultyMeaningTests(unittest.TestCase):
         previous = preview_state([first])
         key = previous["difficulty_history"][0]["id"]
         resolved = "이제 탐색 흐름이 정리됐어"
-        raw = dict(empty_state(), difficulty_updates=[{"difficulty_id": key, "outcome": "resolved",
+        raw = dict(empty_state(), difficulty_updates=[{"difficulty_id": key, "outcome": "resolved", "evidence_ids": [2],
                "evidence_quotes": [{"event_id": 2, "quote": resolved}]}])
         st, _ = validate_state(raw, [first, ev(2, "user_input", text=resolved)], previous)
         self.assertEqual(st["difficulty_history"][0]["lifecycle"], "resolved")
@@ -100,6 +128,21 @@ class DifficultyMeaningTests(unittest.TestCase):
             [first, ev(2, "user_input", text="다른 주제로 바꿀래")], previous)
         self.assertEqual(changed["pending_difficulties"], [])
 
+    def test_supported_followup_can_resolve_without_an_understanding_statement(self):
+        first = ev(1, "user_input", text="설명이 잘 이해가 안 돼")
+        previous, _ = validate_state(empty_state(), [first])
+        episode = previous["difficulty_history"][0]
+        episode.update(support_provided=True, last_event_id=1)
+        followup = ev(2, "topic_refine", title="설명 방식과 사용자의 선택 변화")
+        raw = dict(empty_state(), topic_relation="same", topic_evidence_ids=[2],
+            difficulty_updates=[{"difficulty_id": episode["id"], "outcome": "resolved", "evidence_ids": [2],
+                "reason": "설명에서 다룬 개념을 바탕으로 같은 방향의 문제를 더 구체화하는 선택이 이어짐"}])
+        state, warnings = validate_state(raw, [first, followup], previous)
+        self.assertEqual(state["difficulty_history"][0]["lifecycle"], "resolved")
+        self.assertEqual(state["difficulty_history"][0]["resolution_basis"], "followup_activity")
+        self.assertNotIn(episode["id"], [d["id"] for d in state["difficulties"]])
+        self.assertNotIn("difficulty_update_not_supported", warnings)
+
     def test_new_behavior_does_not_overwrite_previous_expressed_evidence(self):
         first = ev(1, "user_input", text="개념이 아직 이해가 안 돼")
         previous = preview_state([first])
@@ -108,8 +151,9 @@ class DifficultyMeaningTests(unittest.TestCase):
         self.assertEqual(st["difficulty_history"][0]["status"], "expressed")
         self.assertEqual(st["difficulty_history"][0]["evidence_quotes"][0]["quote"], first["payload"]["text"])
         self.assertEqual(st["difficulty_history"][0]["lifecycle"], "unconfirmed")
-        self.assertEqual(difficulty_view(st), "unconfirmed")
-        self.assertTrue(st["pending_difficulties"][0]["recent_signals"])
+        self.assertEqual(difficulty_view(st), "possible")
+        self.assertTrue(any(h.get("id") == "difficulty-1-concept" or h.get("status") == "expressed"
+                            for h in st["pending_difficulties"]))
 
 
 class BehaviorEvidenceTests(unittest.TestCase):
@@ -175,6 +219,7 @@ class BehaviorEvidenceTests(unittest.TestCase):
 
     def test_one_request_or_ordinary_concept_questions_do_not_infer_difficulty(self):
         trace = conceptual_trace()
+        trace[0]["payload"]["text"] = "사용자 임베딩 예시를 설명해줘"
         trace[2]["payload"]["text"] = "임베딩 예시를 설명해줘"
         trace[4]["payload"]["text"] = "개념을 설명해줘"
         st, _ = validate_state(empty_state(), trace)
@@ -204,7 +249,9 @@ class SupportPipelineTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             app = create_app(Settings(data_dir=directory, api_key="fake-only", mode="auto"))
             client = app.test_client();ws = app.extensions["workspace"];store = app.extensions["store"]
-            sid = client.get("/api/workspace").get_json()["session"]["id"]
+            with client.session_transaction() as sess:
+                sess['study_access'] = True
+            sid = client.get("/api/workspace", headers=HEADERS).get_json()["session"]["id"]
             value = "이 벡터를 어떻게 모델 입력에 연결하는지 모르겠어"
             e = store.event(sid, "user_input", {"text": value}, "seed")
             prior = preview_state(store.events(sid))

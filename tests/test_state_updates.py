@@ -23,7 +23,7 @@ def response(candidates=True):
 
 class GroundingTests(unittest.TestCase):
     def test_help_requests_do_not_become_difficulties_even_if_model_claims_them(self):
-        for value,kind in [('대화 상태 추적이 뭐야?','concept'),('예시로 설명해줘','concept'),('A와 B를 비교해줘','selection'),
+        for value,kind in [('예시로 설명해줘','concept'),('A와 B를 비교해줘','selection'),
                            ('왜 이걸 추천했어?','connection'),('다른 주제는 없어?','selection')]:
             with self.subTest(value=value):
                 state,warnings=validate_state(dict(empty_state(),difficulties=[difficulty(1,value,kind)],summary='매우 어려워함'),[event(1,value)])
@@ -31,6 +31,13 @@ class GroundingTests(unittest.TestCase):
                 self.assertEqual(state['difficulty_status'],'unknown')
                 self.assertNotIn('매우 어려워',state['summary'])
                 self.assertIn('difficulty_without_supported_meaning',warnings)
+    def test_specific_definition_question_is_possible_concept_support_not_distress(self):
+        value='대화 상태 추적이 뭐야?'
+        state,_=validate_state(dict(empty_state(),difficulties=[difficulty(1,value,'concept')],summary='매우 어려워함'),[event(1,value)])
+        self.assertEqual(state['difficulties'][0]['status'],'possible')
+        self.assertEqual(state['difficulties'][0]['source'],'question')
+        self.assertEqual(state['difficulty_status'],'possible')
+        self.assertNotIn('매우 어려워',state['summary'])
     def test_each_explicit_difficulty_requires_grounded_quote(self):
         cases={'concept':'설명을 봐도 개념을 이해하기 어려워','connection':'이 후보가 내 관심과 어떻게 연결되는지 모르겠어',
                'selection':'A와 B 중 뭘 고를지 모르겠어','formulation':'이걸 연구 문제로 어떻게 구체화할지 모르겠어'}
@@ -85,6 +92,7 @@ class LifecycleTests(unittest.TestCase):
         self.key=self.previous['difficulty_history'][0]['id']
     def update(self,content):
         raw=dict(empty_state(),difficulty_status='clear',difficulty_updates=[{'difficulty_id':self.key,'outcome':'resolved',
+            'evidence_ids':[2],
             'evidence_quotes':[{'event_id':2,'quote':content}]}])
         return validate_state(raw,[self.first,event(2,content)],self.previous)[0]
     def test_support_or_thanks_does_not_resolve_difficulty(self):
@@ -96,7 +104,7 @@ class LifecycleTests(unittest.TestCase):
     def test_future_and_unresolved_statements_are_not_resolution(self):
         for content in ['이제 이해될까?','이제 이해가 될 것 같아']:
             self.assertEqual(self.update(content)['difficulty_history'][0]['lifecycle'],'unconfirmed')
-        self.assertEqual(self.update('아직 이해가 안 돼')['difficulty_history'][0]['lifecycle'],'active')
+        self.assertEqual(self.update('아직 이해가 안 돼')['difficulty_history'][0]['lifecycle'],'unconfirmed')
     def test_old_evidence_is_not_fresh_confirmation(self):
         state,_=validate_state(dict(empty_state(),difficulties=[difficulty(1,self.value)]),[self.first,event(2,'논문','paper_save')],self.previous)
         self.assertEqual(state['difficulties'],[])
@@ -199,6 +207,7 @@ class ContextRegressionTests(unittest.TestCase):
         value='이제 개념이 이해됐어. 그런데 주제를 어떻게 구체화할지 모르겠어'
         raw=dict(empty_state(),difficulties=[difficulty(2,value,'formulation')],difficulty_updates=[{
             'difficulty_id':previous['difficulty_history'][0]['id'],'outcome':'resolved',
+            'evidence_ids':[2],
             'evidence_quotes':[{'event_id':2,'quote':'이제 개념이 이해됐어'}]}])
         state,_=validate_state(raw,[event(1,'개념을 이해하기 어려워'),event(2,value)],previous)
         self.assertEqual(state['difficulty_history'][0]['lifecycle'],'resolved')
@@ -208,6 +217,7 @@ class ContextRegressionTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             settings=Settings(data_dir=directory,api_key='fake-only',mode='auto')
             app=create_app(settings);client=app.test_client();ws=app.extensions['workspace'];store=app.extensions['store']
+            with client.session_transaction() as sess:sess['study_access']=True
             sid=client.get('/api/workspace').get_json()['session']['id']
             candidate={'id':'remember-me','title':'이전 후보','description':'연구 문제','search_query':'user intent'}
             store.add_message(sid,'first:assistant','assistant',{'recommendations':[candidate]})
