@@ -58,11 +58,11 @@ class StatePresentationTests(unittest.TestCase):
         state,_=validate_state(raw,events,empty_state())
         state=enrich_state(state,events,empty_state())
         self.assertEqual(state['research_problem'],'')
-        self.assertEqual(state['direction_stage'],'unknown')
+        self.assertEqual(state['direction_stage'],'exploring')
         self.assertFalse(any(a['text']=='선택 주도성' for a in state['clarified_aspects']))
     def test_compact_chat_does_not_hide_uncertainty(self):
         state=enrich_state(dict(empty_state(),current_direction='LLM 의도',direction_stage='unknown'),[event(1,text='LLM 의도')])
-        self.assertIn('판단 유보',state['chat_summary'])
+        self.assertIn('구체화 정도는 아직 분명하지 않아요',state['chat_summary'])
         self.assertLessEqual(len(state['chat_summary']),130)
         self.assertEqual(state['direction_stage'],'unknown')
 
@@ -77,7 +77,7 @@ class ResponsePresentationTests(unittest.TestCase):
         raw=self.raw();value=clean_response(raw,[],select_support(dict(empty_state(),support_request='concept')))
         self.assertEqual(value['assistance']['body'],'첫 번째 설명이에요. 두 번째 예시예요.')
         self.assertEqual(value['assistance']['details'],raw['assistance']['body'])
-        self.assertFalse(value['assistance']['expanded'])
+        self.assertTrue(value['assistance']['expanded'])
         self.assertEqual(value['next_step'],'목표가 바뀌는 상황을 비교해 보세요.')
         self.assertEqual(value['recommendations'][0]['description'],'대화 중 목표 변경을 살펴봐요.')
         self.assertEqual(value['recommendations'][0]['relation_label'],'관점 더하기')

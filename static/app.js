@@ -144,8 +144,15 @@ function renderState() {
   $('directionConfidence').dataset.level=directionConfidence;
   $('currentDirection').textContent=(observedProgress?progress.focus:'') || state?.current_direction || '관심에서 출발해 보세요';
   $('stateSummary').textContent=displaySummary(state?.summary) || '대화와 선택을 바탕으로 정리해요.';
-  $('problemSection').hidden=!state?.research_problem;
+  const initialInterest=state?.initial_interest||'';
+  $('initialInterest').hidden=!initialInterest;
+  $('initialInterest').textContent=initialInterest?`처음 관심 · ${initialInterest}`:'';
+  const basis=state?.problem_basis||{};
+  $('problemSection').hidden=!state?.research_problem&&!basis.subject&&!basis.focus;
   $('researchProblem').textContent=state?.research_problem||'';
+  const pathParts=[basis.subject,basis.focus,basis.context].filter(Boolean);
+  $('problemBasis').hidden=pathParts.length<2;
+  $('problemBasis').innerHTML=pathParts.map((part,index)=>`${index?'<span aria-hidden="true">→</span>':''}<span>${esc(part)}</span>`).join('');
   $('changeSection').hidden=!state?.recent_change;
   $('recentChange').textContent=displaySummary(state?.recent_change);
   const aspectLabels={interest:'관심·질문',problem:'연구 문제',perspective:'관점',scope:'검토 범위'};
@@ -188,7 +195,7 @@ function renderState() {
     const waiting=d.lifecycle==='unconfirmed';
     const signals=d.recent_signals||d.signals||[];
     return `<div class="difficulty-item"><b>${esc(difficultyLabels[d.type]||'탐색의 어려움')}${waiting?' · 후속 확인 전':d.status==='possible'?' · 지원 필요 가능성':''}</b><p>${esc(waiting?'이후에 변화가 있었는지 아직 판단하지 않았어요.':d.description)}</p>${d.confidence?`<p class="difficulty-confidence">근거 강도 · ${esc(confidenceLabels[d.confidence]||'근거 제한')}</p>`:''}${d.target&&d.target!==quote?`<p class="difficulty-target">대상 · ${esc(d.target)}</p>`:''}${quote?`<blockquote class="difficulty-evidence">${esc(quote.slice(0,180))}${quote.length>180?'…':''}</blockquote>`:''}${d.inference_reason?`<p class="difficulty-reason">추정 근거 · ${esc(d.inference_reason)}</p>`:''}${signals.length?`<ul class="state-questions">${signals.map(s=>`<li>${esc(s.observation)}</li>`).join('')}</ul>`:''}</div>`;
-  }).join('') : `<p class="difficulty-empty">${unconfirmed?(pendingDifficulties.length?'이전에 표현한 어려움은 후속 확인 전이에요.':'이전에 추정한 도움이 필요한 부분은 후속 확인 전이에요.'):state?.difficulty_status==='clear'?'후속 탐색에서 어려움의 해소·진전 또는 새 방향 탐색이 추정됐어요.':'현재 기록만으로는 어려움의 유무를 판단하기 어려워요.'}</p>`;
+  }).join('') : `<p class="difficulty-empty">${unconfirmed?(pendingDifficulties.length?'이전에 표현한 어려움은 해소 여부를 아직 확인하지 않았어요.':'이전에 추정한 도움이 필요한 부분이 해소되었는지는 아직 확인되지 않았어요.'):state?.difficulty_status==='clear'?'후속 탐색에서 어려움의 해소·진전 또는 새 방향 탐색이 추정됐어요.':'현재 기록만으로는 어려움의 유무를 판단하기 어려워요.'}</p>`;
   $('supportIssueList').innerHTML=supportIssues.map(s=>`<p class="section-note">${esc(s.observation)}</p>`).join('');
   const history=difficultyHistory, lifecycleLabels={active:'진행 중',unconfirmed:'후속 확인 전',resolved:'해소 추정',progressed:'후속 탐색 진전',redirected:'새 방향에서 탐색 재개',out_of_scope:'현재 방향 밖'};
   $('difficultyHistory').hidden=!history.length;
@@ -254,9 +261,9 @@ function renderMessages() {
       ${!BASELINE&&!recs.length&&earlier&&c.recommendation_action==='preserve'?`<button class="text-button previous-candidates" data-previous-candidates="${earlier.id}">기존 탐색 후보 보기 ↑</button>`:''}
       </div>
       ${showWrapup?`<div class="wrapup-offer"><p>${esc(c.wrapup_offer.message)}</p><button class="button" data-wrapup="${esc(c.wrapup_offer.signature)}" ${busy?'disabled':''}>탐색 정리하기</button></div>`:''}
-      ${recs.length?`<div class="recommendations"><div class="rec-heading">다음으로 살펴볼 주제<span class="rec-count">${recs.length}개 후보</span></div>
+      ${recs.length?`<details class="recommendations" ${c.recommendations_collapsed?'':'open'}><summary class="rec-heading">다음으로 살펴볼 주제<span class="rec-count">${recs.length}개 후보</span></summary><div class="rec-content">
       ${recs.map((r,i)=>`<div class="recommendation-row${selected===r.id?' selected':''}"><button class="recommendation" data-rec="${esc(r.id)}" data-message="${m.id}" aria-pressed="${selected===r.id}"><span class="rec-number">${String(i+1).padStart(2,'0')}</span><span><span class="rec-title">${esc(r.title)}</span><span class="rec-description">${r.relation_label?`<span class="rec-relation">${esc(r.relation_label)}</span>`:''}${esc(r.description)}</span></span><span class="rec-indicator" aria-hidden="true"></span></button>${r.search_query?`<div class="rec-search"><div><span class="rec-search-label">검색 키워드</span><span class="rec-query" lang="en">${esc(r.search_query)}</span></div><button class="rec-search-button" data-search-rec="${esc(r.id)}" ${searching?'disabled':''} aria-label="${esc(r.title)} 관련 논문 검색"><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="8.5" cy="8.5" r="5"/><path d="m12.5 12.5 4 4"/></svg>논문 검색</button></div>`:''}</div>`).join('')}
-      <div class="rec-actions"><span class="selection-hint">${selected?`선택: ${esc(recs.find(r=>r.id===selected)?.title||'선택한 주제')}`:'주제를 선택하세요'}</span><button class="button" data-action="browse" data-message="${m.id}" ${!selected||busy?'disabled':''}>둘러보기</button><button class="button primary" data-action="refine" data-message="${m.id}" ${!selected||busy?'disabled':''}>구체화하기</button></div></div>`:''}</article>`;
+      <div class="rec-actions"><span class="selection-hint">${selected?`선택: ${esc(recs.find(r=>r.id===selected)?.title||'선택한 주제')}`:'주제를 선택하세요'}</span><button class="button" data-action="browse" data-message="${m.id}" ${!selected||busy?'disabled':''}>둘러보기</button><button class="button primary" data-action="refine" data-message="${m.id}" ${!selected||busy?'disabled':''}>구체화하기</button></div></div></details>`:''}</article>`;
   }).join('') + local.map(t=>`<article class="message user local-message" data-client-request="${esc(t.payload.request_id)}"><div class="user-content">${esc(t.display)}</div>${t.failed?`<div class="local-message-status">전송 확인 필요 <button class="local-retry" data-retry-local="${esc(t.payload.request_id)}" ${busy?'disabled':''}>다시 보내기</button></div>`:''}</article>`).join('');
   document.querySelectorAll('[data-rec]').forEach(b=>b.addEventListener('click',()=>selectRecommendation(b.dataset.message,b.dataset.rec)));
   document.querySelectorAll('[data-action]').forEach(b=>b.addEventListener('click',()=>sendTurn({action:b.dataset.action,recommendation_id:selections.get(b.dataset.message)})));

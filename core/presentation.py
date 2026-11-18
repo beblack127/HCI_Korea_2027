@@ -46,7 +46,7 @@ def chat_summary(state):
             summary += f" {label} 도움이 필요할 수 있다는 흐름이 보여요."
         elif pending:
             label = labels.get(pending[-1]["type"], "탐색")
-            summary += f" 이전 {label} 어려움의 후속 변화를 살펴보고 있어요."
+            summary += f" 이전 {label} 어려움은 해소 여부를 후속 확인 중이에요."
         return summary
     if expressed:
         if expressed["type"] == "unspecified":
@@ -56,7 +56,7 @@ def chat_summary(state):
         return f"활동 흐름에서 {labels.get(active[0]['type'], '탐색')} 지원이 필요할 가능성이 있어요."
     if pending:
         label = labels.get(pending[-1]["type"], "탐색")
-        return f"이전에 표현한 {label} 어려움의 후속 변화를 살펴보고 있어요."
+        return f"이전에 표현한 {label} 어려움은 해소 여부를 후속 확인 중이에요."
     if state.get("direction_stage") == "forming" and topic:
         return f"‘{topic}’에 관한 연구 문제의 범위를 구체화하고 있어요."
     if topic:

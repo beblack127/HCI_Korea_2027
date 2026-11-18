@@ -2,10 +2,11 @@
 from .difficulty import pending_difficulties
 
 
-POLICY_VERSION = "11.12-v2"
+POLICY_VERSION = "11.18-v1"
 
 
 def select_support(state, latest_action="", has_candidates=False, initial=False):
+    source = "default_policy"
     request = state.get("support_request", "directions")
     if latest_action in {"browse", "refine"}:
         mode = "formulate" if latest_action == "refine" else "browse"
@@ -13,10 +14,12 @@ def select_support(state, latest_action="", has_candidates=False, initial=False)
     elif request != "directions":
         mode, reason = request, "사용자가 이번 입력에서 요청한 지원을 우선합니다."
         evidence_ids = state.get("support_request_evidence_ids", [])
+        source = "current_request"
     elif state.get("difficulties"):
         d = sorted(state["difficulties"], key=lambda x: x.get("status") != "expressed")[0]
         mode = {"concept": "concept", "connection": "connection", "selection": "compare", "formulation": "formulate", "unspecified": "orient"}[d["type"]]
         reason, evidence_ids = d["description"], d["evidence_ids"]
+        source = d.get("source", "estimated_state")
     else:
         mode, evidence_ids = "directions", []
         reason = "현재 연구 문제 안의 관점과 범위를 구체화합니다." if state.get("direction_stage") == "forming" else "구분되는 연구 문제의 관점을 살펴볼 수 있도록 제안합니다."
@@ -33,24 +36,33 @@ def select_support(state, latest_action="", has_candidates=False, initial=False)
     focus = {"browse": "selected_direction", "concept": "current_concept", "connection": "current_connection", "compare": "existing_candidates",
              "literature": "current_literature", "formulate": "research_problem"}.get(mode, "direction_options")
     concept_pending = mode == "concept" and state.get("recommendation_intent") != "generate" and any(
-        h.get("type") == "concept" and h.get("status") == "expressed" and h.get("lifecycle") in {"active", "unconfirmed"}
+        h.get("type") == "concept" and h.get("status") in {"expressed", "possible"}
+        and h.get("lifecycle") in {"active", "unconfirmed"}
         for h in state.get("difficulty_history", []))
     targets = sorted(state.get("difficulties", []), key=lambda d: d.get("status") != "expressed") or list(reversed(pending_difficulties(state)))
     target = targets[0] if targets else None
     adjustment = ({"type": target["type"], "source": "pending" if target.get("lifecycle") == "unconfirmed" else target.get("source", "utterance"),
                    "status": target.get("status"), "evidence_ids": target.get("evidence_ids", []),
                    "evidence_quotes": target.get("evidence_quotes", []), "signals": target.get("recent_signals", target.get("signals", []))} if target else None)
-    return {"version": POLICY_VERSION, "mode": mode, "reason": reason, "evidence_ids": evidence_ids,
+    if latest_action in {"browse", "refine"}:
+        source = "user_selection"
+    elif state.get("request_intent") == "new_direction":
+        source = "new_direction_request"
+    elif state.get("request_intent") == "synthesis":
+        mode, source = "synthesis", "synthesis_request"
+        focus = "session_recap"
+    synthesis = mode == "synthesis"
+    return {"version": POLICY_VERSION, "mode": mode, "source": source, "reason": reason, "evidence_ids": evidence_ids,
             "breadth": breadth, "retrieve_literature": mode == "literature",
-            "recommendation_action": "generate", "recommendation_focus": focus, "has_candidates": has_candidates,
-            "recommendation_count": 3,
+            "recommendation_action": "complete" if synthesis else "generate", "recommendation_focus": focus, "has_candidates": has_candidates,
+            "recommendation_count": 0 if synthesis else 3,
             "concept_difficulty_pending": concept_pending,
             "commitment_requested": state.get("commitment_requested", False),
             "detail_requested": state.get("detail_requested", False),
             "support_adjustment": adjustment, "system_support_issues": state.get("support_issues", []),
             "focus_correction": state.get("focus_update") if state.get("correction_requested") else None,
             "correction_requested": bool(state.get("correction_requested")),
-            "assistance_required": mode != "directions" or bool(state.get("correction_requested")) or bool(adjustment and state.get("recommendation_intent") != "generate")}
+            "assistance_required": not synthesis and (mode != "directions" or bool(state.get("correction_requested")) or bool(adjustment and state.get("recommendation_intent") != "generate"))}
 
 
 def default_next_step(plan):

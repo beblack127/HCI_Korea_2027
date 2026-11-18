@@ -43,7 +43,8 @@ def clean_response(raw, papers, plan=None):
     legacy = raw.get("support") or {}
     if not isinstance(legacy, dict):
         legacy = {}
-    full_body = text(assistance.get("body") or raw.get("answer") or legacy.get("body"), 2500)
+    body_limit = 900 if plan.get("detail_requested") or plan.get("mode") == "concept" else 2500
+    full_body = text(assistance.get("body") or raw.get("answer") or legacy.get("body"), body_limit)
     body = compact(full_body, sentences=2, limit=320)
     if not plan.get("assistance_required"):
         body = ""
@@ -51,10 +52,11 @@ def clean_response(raw, papers, plan=None):
     verified_papers = [supplied[pid] for pid in assistance.get("paper_ids", legacy.get("paper_ids", []))
                        if isinstance(pid, str) and pid in supplied][:3]
     result = {"answer": body, "recommendations": [], "response_format": "11.10-v3",
+              "recommendations_collapsed": bool(plan.get("detail_requested") or plan.get("mode") == "concept"),
               "assistance": {"title": text(assistance.get("title") or legacy.get("title"), 100) if body else "",
                              "body": body, "papers": verified_papers,
                              "details": full_body if body and full_body != body else "",
-                             "expanded": bool(plan.get("detail_requested"))},
+                             "expanded": bool(plan.get("detail_requested") or plan.get("mode") == "concept")},
               "support": {"title": "", "body": "", "papers": verified_papers},
               "next_step": compact(raw.get("next_step"), limit=140), "next_step_reason": text(raw.get("next_step_reason"), 500)}
     for r in (raw.get("recommendations") or [])[:plan["recommendation_count"]]:
@@ -223,9 +225,29 @@ class Workspace:
             messages = self.store.messages(sid)
             available = next((m["content"]["recommendations"] for m in reversed(messages)
                               if m["role"] == "assistant" and m["content"].get("recommendations")), [])
+            direction_boundary = (prior or {}).get("state", {}).get("direction_context_start_event_id", 0)
+            scoped_response_ids = {e["payload"].get("request_id") for e in observations
+                                   if e["type"] == "agent_response"
+                                   and e["payload"].get("estimate_through_event_id", 0) >= direction_boundary}
+            candidate_history = [m["content"].get("recommendations", []) for m in messages
+                                 if m["role"] == "assistant" and m.get("request_id") in scoped_response_ids
+                                 and m["content"].get("recommendations")]
+            if candidate:
+                all_recommendations = {r["id"]: r for m in messages if m["role"] == "assistant"
+                                       for r in m["content"].get("recommendations", []) if r.get("id")}
+                depth, node, seen = 1, candidate, set()
+                while node.get("parent_recommendation_id") and node["parent_recommendation_id"] not in seen:
+                    seen.add(node["parent_recommendation_id"])
+                    parent = all_recommendations.get(node["parent_recommendation_id"])
+                    if not parent:
+                        break
+                    depth += 1
+                    node = parent
+                candidate["direction_depth"] = depth
             context = {"events": selected, "prior_estimate": prior["state"] if prior else None,
                        "behavior_signals": behavior_signals(observations), "support_issues": support_issues(observations),
-                       "messages": conversation_context(messages), "available_directions": available, "latest_action": action,
+                       "messages": conversation_context(messages), "available_directions": available,
+                       "candidate_history": candidate_history, "latest_action": action,
                        "latest_input": display, "selected_direction": candidate,
                        "context_window": {"total_events": len(observations), "observed_events": len(observed_events),
                                           "included_events": len(selected), "message_window": 8}}
@@ -293,7 +315,7 @@ class Workspace:
                      next_step=recap["next_checks"][0], next_step_reason="관련 문헌과 대조하며 현재 연구 방향을 더 검토할 수 있어요.")
         state.pop("response_error", None)
         state["recommendation_context"] = []
-        plan = {"version": POLICY_VERSION, "mode": "wrapup", "recommendation_count": 0,
+        plan = {"version": POLICY_VERSION, "mode": "wrapup", "source": "user_selection", "recommendation_count": 0,
                 "recommendation_action": "complete", "retrieve_literature": False}
         provenance = dict(self.provenance(), source_request_id=prior["request_id"], model_calls=0,
                           summary_method="validated_state_projection")
@@ -332,7 +354,14 @@ class Workspace:
             except SearchError as exc:
                 retrieval_error = str(exc)
                 self.store.event(sid, "support_retrieval_error", {"message": retrieval_error})
-        if self.settings.live:
+        if plan["mode"] == "synthesis":
+            recap = session_recap(state)
+            response = {"response_format": "11.18-v1", "answer": "이번 탐색에서 드러난 내용을 잠정적으로 정리했어요.",
+                        "recommendations": [], "recommendation_action": "complete", "recap": recap,
+                        "assistance": {"title": "", "body": "", "papers": []},
+                        "next_step": (recap.get("next_checks") or [""])[0],
+                        "next_step_reason": "현재 세션에서 확인된 연구 방향과 남은 검토 지점을 함께 살펴볼 수 있어요."}
+        elif self.settings.live:
             self.set_progress(sid, request_id, "generating")
             response_context = {"estimated_state": state, "support_plan": plan,
                 "latest_action": action, "latest_input": display, "selected_direction": candidate,
@@ -351,7 +380,8 @@ class Workspace:
                         raise
                     issues = ["invalid_response_content"]
                 else:
-                    issues = completed_response_issues(response, context["available_directions"], validation_mode, candidate, display)
+                    issues = completed_response_issues(response, context["available_directions"], validation_mode,
+                                                       candidate, display, context.get("candidate_history"))
                 checks.append(issues)
                 quality = {"attempts": attempt + 1, "issues_by_attempt": checks,
                            "status": "passed" if not issues else "repairing" if attempt == 0 else "failed"}

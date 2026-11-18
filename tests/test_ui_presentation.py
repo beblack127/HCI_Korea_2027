@@ -23,14 +23,17 @@ class UIPresentationTests(unittest.TestCase):
     def page(self):
         temp=tempfile.TemporaryDirectory();self.addCleanup(temp.cleanup)
         app=create_app(Settings(data_dir=temp.name,mode='preview',api_key=''))
-        html=app.test_client().get('/').get_data(as_text=True)
+        client=app.test_client()
+        with client.session_transaction() as sess:sess['study_access']=True
+        html=client.get('/').get_data(as_text=True)
         parser=Elements();parser.feed(html)
         return html,parser
 
     def test_primary_state_flow_precedes_collapsed_detail_and_keeps_evidence(self):
         html,p=self.page()
-        self.assertLess(html.index('id="changeSection"'),html.index('id="nextSection"'))
-        self.assertLess(html.index('id="nextSection"'),html.index('id="stateDetails"'))
+        self.assertLess(html.index('class="state-summary-card"'),html.index('id="nextSection"'))
+        self.assertLess(html.index('id="nextSection"'),html.index('id="changeSection"'))
+        self.assertLess(html.index('id="changeSection"'),html.index('id="stateDetails"'))
         self.assertNotIn('open',p.attrs['stateDetails'])
         self.assertTrue(any(x[1]=='stateDetails' for x in p.parents['clarifiedAspects']))
         self.assertTrue(any(x[1]=='stateDetails' for x in p.parents['researchProblem']))
